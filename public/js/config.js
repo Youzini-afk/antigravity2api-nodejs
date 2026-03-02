@@ -85,12 +85,22 @@ function toggleRequestCountInput() {
     }
 }
 
+function handleThresholdPolicyChange() {
+    const enabled = document.getElementById('thresholdPolicyEnabled')?.checked;
+    const container = document.getElementById('thresholdPolicyFields');
+    if (!container) return;
+    container.style.opacity = enabled ? '1' : '0.6';
+    container.querySelectorAll('input, select').forEach(el => {
+        el.disabled = !enabled;
+    });
+}
+
 async function loadRotationStatus() {
     try {
         const response = await authFetch('/admin/rotation');
         const data = await response.json();
         if (data.success) {
-            const { strategy, requestCount, currentIndex } = data.data;
+            const { strategy, requestCount, currentIndex, thresholdPolicy } = data.data;
             const strategyNames = {
                 'round_robin': '均衡负载',
                 'quota_exhausted': '额度耗尽切换',
@@ -101,6 +111,9 @@ async function loadRotationStatus() {
                 let statusText = `${strategyNames[strategy] || strategy}`;
                 if (strategy === 'request_count') {
                     statusText += ` (每${requestCount}次)`;
+                }
+                if (thresholdPolicy?.enabled) {
+                    statusText += ` | 阈值: 组<=${thresholdPolicy.modelGroupPercent}% 全局<=${thresholdPolicy.globalPercent}%`;
                 }
                 statusText += ` | 当前索引: ${currentIndex}`;
                 statusEl.textContent = statusText;
@@ -178,10 +191,35 @@ async function loadConfig() {
                 if (form.elements['ROTATION_REQUEST_COUNT']) {
                     form.elements['ROTATION_REQUEST_COUNT'].value = json.rotation.requestCount || 10;
                 }
+
+                const thresholdPolicy = json.rotation.thresholdPolicy || {};
+                if (form.elements['ROTATION_THRESHOLD_ENABLED']) {
+                    form.elements['ROTATION_THRESHOLD_ENABLED'].checked = thresholdPolicy.enabled === true;
+                }
+                if (form.elements['ROTATION_THRESHOLD_MODEL_GROUP_PERCENT']) {
+                    form.elements['ROTATION_THRESHOLD_MODEL_GROUP_PERCENT'].value = thresholdPolicy.modelGroupPercent ?? 20;
+                }
+                if (form.elements['ROTATION_THRESHOLD_GLOBAL_PERCENT']) {
+                    form.elements['ROTATION_THRESHOLD_GLOBAL_PERCENT'].value = thresholdPolicy.globalPercent ?? 20;
+                }
+                if (form.elements['ROTATION_THRESHOLD_APPLY_ROUND_ROBIN']) {
+                    form.elements['ROTATION_THRESHOLD_APPLY_ROUND_ROBIN'].checked = thresholdPolicy.applyStrategies?.round_robin !== false;
+                }
+                if (form.elements['ROTATION_THRESHOLD_APPLY_REQUEST_COUNT']) {
+                    form.elements['ROTATION_THRESHOLD_APPLY_REQUEST_COUNT'].checked = thresholdPolicy.applyStrategies?.request_count !== false;
+                }
+                if (form.elements['ROTATION_THRESHOLD_APPLY_QUOTA_EXHAUSTED']) {
+                    form.elements['ROTATION_THRESHOLD_APPLY_QUOTA_EXHAUSTED'].checked = thresholdPolicy.applyStrategies?.quota_exhausted !== false;
+                }
+                if (form.elements['ROTATION_THRESHOLD_ALL_BELOW_ACTION']) {
+                    form.elements['ROTATION_THRESHOLD_ALL_BELOW_ACTION'].value = thresholdPolicy.allBelowThresholdAction || 'strict';
+                }
                 toggleRequestCountInput();
+                handleThresholdPolicyChange();
             }
 
             loadRotationStatus();
+            handleThresholdPolicyChange();
             // 默认只显示当前激活的设置分区（便于后续扩展）
             if (typeof setActiveSettingSection === 'function') {
                 setActiveSettingSection(activeSettingSectionId, false);
@@ -302,6 +340,21 @@ async function saveConfig(e) {
     jsonConfig.other.cacheImageSignatures = form.elements['CACHE_IMAGE_SIGNATURES']?.checked ?? true;
     jsonConfig.other.cacheThinking = form.elements['CACHE_THINKING']?.checked ?? true;
     jsonConfig.other.fakeNonStream = form.elements['FAKE_NON_STREAM']?.checked ?? true;
+    const modelGroupPercentRaw = parseFloat(form.elements['ROTATION_THRESHOLD_MODEL_GROUP_PERCENT']?.value || '20');
+    const globalPercentRaw = parseFloat(form.elements['ROTATION_THRESHOLD_GLOBAL_PERCENT']?.value || '20');
+    const modelGroupPercent = Number.isFinite(modelGroupPercentRaw) ? Math.min(100, Math.max(0, modelGroupPercentRaw)) : 20;
+    const globalPercent = Number.isFinite(globalPercentRaw) ? Math.min(100, Math.max(0, globalPercentRaw)) : 20;
+    jsonConfig.rotation.thresholdPolicy = {
+        enabled: form.elements['ROTATION_THRESHOLD_ENABLED']?.checked || false,
+        modelGroupPercent,
+        globalPercent,
+        applyStrategies: {
+            round_robin: form.elements['ROTATION_THRESHOLD_APPLY_ROUND_ROBIN']?.checked ?? true,
+            request_count: form.elements['ROTATION_THRESHOLD_APPLY_REQUEST_COUNT']?.checked ?? true,
+            quota_exhausted: form.elements['ROTATION_THRESHOLD_APPLY_QUOTA_EXHAUSTED']?.checked ?? true
+        },
+        allBelowThresholdAction: form.elements['ROTATION_THRESHOLD_ALL_BELOW_ACTION']?.value || 'strict'
+    };
 
     Object.entries(allConfig).forEach(([key, value]) => {
         if (sensitiveKeys.includes(key)) {
@@ -330,6 +383,15 @@ async function saveConfig(e) {
             }
             else if (key === 'ROTATION_STRATEGY') jsonConfig.rotation.strategy = value || undefined;
             else if (key === 'ROTATION_REQUEST_COUNT') jsonConfig.rotation.requestCount = parseInt(value) || undefined;
+            else if (key === 'ROTATION_THRESHOLD_ENABLED' ||
+                key === 'ROTATION_THRESHOLD_MODEL_GROUP_PERCENT' ||
+                key === 'ROTATION_THRESHOLD_GLOBAL_PERCENT' ||
+                key === 'ROTATION_THRESHOLD_APPLY_ROUND_ROBIN' ||
+                key === 'ROTATION_THRESHOLD_APPLY_REQUEST_COUNT' ||
+                key === 'ROTATION_THRESHOLD_APPLY_QUOTA_EXHAUSTED' ||
+                key === 'ROTATION_THRESHOLD_ALL_BELOW_ACTION') {
+                // 轮询阈值配置已在上方统一处理
+            }
             else envConfig[key] = value;
         }
     });

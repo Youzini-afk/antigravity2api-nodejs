@@ -240,10 +240,11 @@ export async function generateNoStreamResponse(requestBody, token, model) {
 
 /**
  * 获取可用的 Token
+ * @param {string|null} modelId - 模型 ID（用于阈值判断）
  * @returns {Promise<Object|null>} Token 对象
  */
-export async function getToken() {
-  return geminicliTokenManager.getToken();
+export async function getToken(modelId = null) {
+  return geminicliTokenManager.getToken(modelId);
 }
 
 /**

@@ -212,6 +212,15 @@ class QuotaManager {
   }
 
   /**
+   * 获取额度数据（忽略缓存过期检查）
+   * @param {string} refreshToken - Token ID
+   * @returns {Object|null} 额度数据
+   */
+  getQuotaAnyAge(refreshToken) {
+    return this.cache.get(refreshToken) || null;
+  }
+
+  /**
    * 获取指定 token 的请求计数
    * @param {string} refreshToken - Token ID
    * @returns {Object} 请求计数 { claude: number, gemini: number, banana: number, other: number }
@@ -280,6 +289,42 @@ class QuotaManager {
     }
 
     return found ? minRemaining : 1;
+  }
+
+  /**
+   * 获取指定 token 的全局最小额度（跨所有模型组）
+   * @param {string} tokenId - Token ID
+   * @returns {{remaining: number, hasData: boolean}} remaining 范围 0-1
+   */
+  getGlobalMinQuota(tokenId) {
+    const data = this.cache.get(tokenId);
+    if (!data || !data.models) {
+      return { remaining: 1, hasData: false };
+    }
+
+    const entries = Object.values(data.models);
+    if (!entries.length) {
+      return { remaining: 1, hasData: false };
+    }
+
+    let minRemaining = 1;
+    let hasData = false;
+
+    for (const quotaData of entries) {
+      if (!quotaData) continue;
+      const remaining = quotaData.r;
+      if (!Number.isFinite(remaining)) continue;
+      hasData = true;
+      if (remaining < minRemaining) {
+        minRemaining = remaining;
+      }
+    }
+
+    if (!hasData) {
+      return { remaining: 1, hasData: false };
+    }
+
+    return { remaining: minRemaining, hasData: true };
   }
 
   /**

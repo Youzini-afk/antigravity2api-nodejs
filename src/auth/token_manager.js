@@ -20,6 +20,36 @@ const RotationStrategy = {
   REQUEST_COUNT: 'request_count'        // 自定义次数后切换
 };
 
+const DEFAULT_THRESHOLD_POLICY = Object.freeze({
+  enabled: false,
+  modelGroupPercent: 20,
+  globalPercent: 20,
+  applyStrategies: {
+    round_robin: true,
+    request_count: true,
+    quota_exhausted: true
+  },
+  allBelowThresholdAction: 'strict'
+});
+
+function clampPercent(value, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  if (num < 0) return 0;
+  if (num > 100) return 100;
+  return num;
+}
+
+function cloneThresholdPolicy(policy) {
+  return {
+    enabled: policy.enabled,
+    modelGroupPercent: policy.modelGroupPercent,
+    globalPercent: policy.globalPercent,
+    applyStrategies: { ...policy.applyStrategies },
+    allBelowThresholdAction: policy.allBelowThresholdAction
+  };
+}
+
 /**
  * Token 管理器
  * 负责 Token 的存储、轮询、刷新等功能
@@ -42,6 +72,8 @@ class TokenManager {
     this.requestCountPerToken = DEFAULT_REQUEST_COUNT_PER_TOKEN;
     /** @type {Map<string, number>} */
     this.tokenRequestCounts = new Map();
+    this.thresholdPolicy = cloneThresholdPolicy(DEFAULT_THRESHOLD_POLICY);
+    this.quotaRefreshInFlight = new Map();
 
     // 针对额度耗尽策略的可用 token 索引缓存（优化大规模账号场景）
     /** @type {number[]} */
@@ -174,26 +206,56 @@ class TokenManager {
     return this._initPromise;
   }
 
+  _normalizeThresholdPolicy(input) {
+    const base = cloneThresholdPolicy(DEFAULT_THRESHOLD_POLICY);
+    if (!input || typeof input !== 'object') return base;
+
+    if (typeof input.enabled === 'boolean') {
+      base.enabled = input.enabled;
+    }
+
+    base.modelGroupPercent = clampPercent(input.modelGroupPercent, base.modelGroupPercent);
+    base.globalPercent = clampPercent(input.globalPercent, base.globalPercent);
+
+    if (input.applyStrategies && typeof input.applyStrategies === 'object') {
+      const allowedKeys = ['round_robin', 'request_count', 'quota_exhausted'];
+      for (const key of allowedKeys) {
+        if (typeof input.applyStrategies[key] === 'boolean') {
+          base.applyStrategies[key] = input.applyStrategies[key];
+        }
+      }
+    }
+
+    if (input.allBelowThresholdAction === 'strict' || input.allBelowThresholdAction === 'fail_open') {
+      base.allBelowThresholdAction = input.allBelowThresholdAction;
+    }
+
+    return base;
+  }
+
   // 加载轮询策略配置
   loadRotationConfig() {
     try {
       const jsonConfig = getConfigJson();
-      if (jsonConfig.rotation) {
-        this.rotationStrategy = jsonConfig.rotation.strategy || RotationStrategy.ROUND_ROBIN;
-        this.requestCountPerToken = jsonConfig.rotation.requestCount || 10;
-      }
+      const rotation = jsonConfig.rotation || {};
+      this.rotationStrategy = rotation.strategy || RotationStrategy.ROUND_ROBIN;
+      this.requestCountPerToken = rotation.requestCount || 10;
+      this.thresholdPolicy = this._normalizeThresholdPolicy(rotation.thresholdPolicy);
     } catch (error) {
       log.warn('加载轮询配置失败，使用默认值:', error.message);
     }
   }
 
   // 更新轮询策略（热更新）
-  updateRotationConfig(strategy, requestCount) {
+  updateRotationConfig(strategy, requestCount, thresholdPolicy = undefined) {
     if (strategy && Object.values(RotationStrategy).includes(strategy)) {
       this.rotationStrategy = strategy;
     }
     if (requestCount && requestCount > 0) {
       this.requestCountPerToken = requestCount;
+    }
+    if (thresholdPolicy !== undefined) {
+      this.thresholdPolicy = this._normalizeThresholdPolicy(thresholdPolicy);
     }
     // 重置计数器
     this.tokenRequestCounts.clear();
@@ -741,6 +803,192 @@ class TokenManager {
     return this._hasQuotaForModel(token, modelId);
   }
 
+  _shouldApplyThresholdForStrategy(strategy) {
+    const policy = this.thresholdPolicy;
+    if (!policy?.enabled) return false;
+    const map = policy.applyStrategies || {};
+    return map[strategy] === true;
+  }
+
+  async _getTokenIdAsync(token) {
+    if (!token?.refresh_token) return null;
+    try {
+      const salt = this.store._salt || await this.store.getSalt();
+      if (!salt) return null;
+      return generateTokenId(token.refresh_token, salt);
+    } catch {
+      return null;
+    }
+  }
+
+  _buildApiHeaders(token) {
+    return {
+      'Host': config.api.host,
+      'User-Agent': config.api.userAgent,
+      'Authorization': `Bearer ${token.access_token}`,
+      'Content-Type': 'application/json',
+      'Accept-Encoding': 'gzip'
+    };
+  }
+
+  async _fetchModelsWithQuotas(token) {
+    const response = await axios(buildAxiosRequestConfig({
+      method: 'POST',
+      url: config.api.modelsUrl,
+      headers: this._buildApiHeaders(token),
+      data: {}
+    }));
+
+    const data = response.data || {};
+    const quotas = {};
+    Object.entries(data.models || {}).forEach(([modelId, modelData]) => {
+      if (modelData?.quotaInfo) {
+        quotas[modelId] = {
+          r: modelData.quotaInfo.remainingFraction,
+          t: modelData.quotaInfo.resetTime
+        };
+      }
+    });
+    return quotas;
+  }
+
+  async _refreshQuotaSync(token, tokenId) {
+    if (!tokenId) return false;
+    if (this.quotaRefreshInFlight.has(tokenId)) {
+      return this.quotaRefreshInFlight.get(tokenId);
+    }
+
+    const task = (async () => {
+      try {
+        if (this.isExpired(token)) {
+          await this.refreshToken(token, true);
+        }
+        const quotas = await this._fetchModelsWithQuotas(token);
+        quotaManager.updateQuota(tokenId, quotas);
+        return true;
+      } catch (error) {
+        log.warn(`刷新额度失败(${tokenId}): ${error.message}`);
+        return false;
+      } finally {
+        this.quotaRefreshInFlight.delete(tokenId);
+      }
+    })();
+    this.quotaRefreshInFlight.set(tokenId, task);
+    return task;
+  }
+
+  _refreshQuotaAsync(token, tokenId) {
+    if (!tokenId) return;
+    if (this.quotaRefreshInFlight.has(tokenId)) return;
+    void this._refreshQuotaSync(token, tokenId);
+  }
+
+  async _ensureQuotaForThreshold(token, tokenId) {
+    if (!tokenId) return;
+    const fresh = quotaManager.getQuota(tokenId);
+    if (fresh) return;
+
+    const stale = quotaManager.getQuotaAnyAge(tokenId);
+    if (!stale) {
+      // 首次无额度数据：同步刷新一次
+      await this._refreshQuotaSync(token, tokenId);
+      return;
+    }
+
+    // 有过期数据：当前判定先用旧数据，同时异步刷新
+    this._refreshQuotaAsync(token, tokenId);
+  }
+
+  async _evaluateThreshold(token, modelId) {
+    const policy = this.thresholdPolicy;
+    if (!policy?.enabled || !modelId) {
+      return { pass: true, reason: 'disabled' };
+    }
+
+    const tokenId = await this._getTokenIdAsync(token);
+    if (!tokenId) {
+      return { pass: true, reason: 'no_token_id' };
+    }
+
+    await this._ensureQuotaForThreshold(token, tokenId);
+
+    if (!quotaManager.hasQuotaData(tokenId)) {
+      // 无额度数据时先放行
+      return { pass: true, reason: 'no_quota_data' };
+    }
+
+    const modelGroupRemaining = quotaManager.getModelGroupQuota(tokenId, modelId);
+    const globalMin = quotaManager.getGlobalMinQuota(tokenId);
+    const globalRemaining = globalMin.hasData ? globalMin.remaining : 1;
+
+    const groupThreshold = policy.modelGroupPercent / 100;
+    const globalThreshold = policy.globalPercent / 100;
+
+    const groupBlocked = modelGroupRemaining <= groupThreshold;
+    const globalBlocked = globalRemaining <= globalThreshold;
+    if (!groupBlocked && !globalBlocked) {
+      return {
+        pass: true,
+        modelGroupRemaining,
+        globalRemaining
+      };
+    }
+
+    return {
+      pass: false,
+      reason: groupBlocked && globalBlocked ? 'group_and_global' : (groupBlocked ? 'group' : 'global'),
+      modelGroupRemaining,
+      globalRemaining,
+      groupThreshold,
+      globalThreshold
+    };
+  }
+
+  async _checkThresholdAndCollectFallback(token, modelId, fallbackCandidates, tokenIndex) {
+    const policy = this.thresholdPolicy;
+    const thresholdResult = await this._evaluateThreshold(token, modelId);
+    if (thresholdResult.pass) {
+      return true;
+    }
+
+    if (policy.allBelowThresholdAction === 'fail_open') {
+      fallbackCandidates.push(tokenIndex);
+    }
+    return false;
+  }
+
+  async _tryGetFallbackToken(fallbackCandidates, strategy = this.rotationStrategy) {
+    for (const tokenIndex of fallbackCandidates) {
+      const token = this.tokens[tokenIndex];
+      if (!token) continue;
+      try {
+        const result = await this._prepareToken(token);
+        if (result === 'disable') {
+          this.disableToken(token);
+          continue;
+        }
+        this.currentIndex = tokenIndex;
+        if (strategy === RotationStrategy.ROUND_ROBIN) {
+          this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
+        } else if (strategy === RotationStrategy.REQUEST_COUNT) {
+          const tokenKey = token.refresh_token;
+          const count = this.tokenRequestCounts.get(tokenKey) || 0;
+          if (count >= this.requestCountPerToken) {
+            this.resetRequestCount(tokenKey);
+            this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
+          }
+        }
+        return token;
+      } catch (error) {
+        const action = this._handleTokenError(error, token);
+        if (action === 'disable') {
+          this.disableToken(token);
+        }
+      }
+    }
+    return null;
+  }
+
   /**
    * 获取可用的 token
    * @param {string} [modelId] - 可选，请求的模型 ID，用于检查该模型的额度
@@ -779,6 +1027,10 @@ class TokenManager {
     if (modelId) {
       allTokensExhausted = this._checkAllTokensExhaustedForModel(modelId);
     }
+    const applyThreshold = modelId && this._shouldApplyThresholdForStrategy(RotationStrategy.QUOTA_EXHAUSTED);
+    const fallbackCandidates = [];
+    let thresholdCheckedCount = 0;
+    let thresholdFilteredCount = 0;
 
     const startIndex = this.currentQuotaIndex % totalAvailable;
 
@@ -791,6 +1043,15 @@ class TokenManager {
       if (modelId && !allTokensExhausted) {
         if (!this._canUseTokenForModel(token, modelId)) {
           // 该 token 对该模型不可用（额度为 0 或在冷却中），跳过
+          continue;
+        }
+      }
+
+      if (applyThreshold) {
+        thresholdCheckedCount++;
+        const pass = await this._checkThresholdAndCollectFallback(token, modelId, fallbackCandidates, tokenIndex);
+        if (!pass) {
+          thresholdFilteredCount++;
           continue;
         }
       }
@@ -822,6 +1083,22 @@ class TokenManager {
       }
     }
 
+    const allBelowThreshold = thresholdCheckedCount > 0 && thresholdFilteredCount === thresholdCheckedCount;
+    if (applyThreshold && allBelowThreshold) {
+      if (this.thresholdPolicy.allBelowThresholdAction === 'fail_open') {
+        log.warn(`阈值策略触发保底放行: 模型 ${modelId} 所有候选凭证均低于阈值，尝试保底选取`);
+        const fallbackToken = await this._tryGetFallbackToken(fallbackCandidates, RotationStrategy.QUOTA_EXHAUSTED);
+        if (fallbackToken) {
+          const pos = this.availableQuotaTokenIndices.indexOf(this.currentIndex);
+          if (pos !== -1) this.currentQuotaIndex = pos;
+          return fallbackToken;
+        }
+      } else {
+        log.warn(`阈值策略严格模式生效: 模型 ${modelId} 所有候选凭证均低于阈值，返回无可用凭证`);
+        return null;
+      }
+    }
+
     // 所有可用 token 都不可用，重置额度状态
     this._resetAllQuotas();
     return this.tokens[0] || null;
@@ -841,6 +1118,10 @@ class TokenManager {
     if (modelId) {
       allTokensExhausted = this._checkAllTokensExhaustedForModel(modelId);
     }
+    const applyThreshold = modelId && this._shouldApplyThresholdForStrategy(this.rotationStrategy);
+    const fallbackCandidates = [];
+    let thresholdCheckedCount = 0;
+    let thresholdFilteredCount = 0;
 
     for (let i = 0; i < totalTokens; i++) {
       const index = (startIndex + i) % totalTokens;
@@ -850,6 +1131,15 @@ class TokenManager {
       if (modelId && !allTokensExhausted) {
         if (!this._canUseTokenForModel(token, modelId)) {
           // 该 token 对该模型不可用（额度为 0 或在冷却中），跳过
+          continue;
+        }
+      }
+
+      if (applyThreshold) {
+        thresholdCheckedCount++;
+        const pass = await this._checkThresholdAndCollectFallback(token, modelId, fallbackCandidates, index);
+        if (!pass) {
+          thresholdFilteredCount++;
           continue;
         }
       }
@@ -887,6 +1177,16 @@ class TokenManager {
         }
         // skip: 继续尝试下一个 token
       }
+    }
+
+    const allBelowThreshold = thresholdCheckedCount > 0 && thresholdFilteredCount === thresholdCheckedCount;
+    if (applyThreshold && allBelowThreshold) {
+      if (this.thresholdPolicy.allBelowThresholdAction === 'fail_open') {
+        log.warn(`阈值策略触发保底放行: 模型 ${modelId} 所有候选凭证均低于阈值，尝试保底选取`);
+        return this._tryGetFallbackToken(fallbackCandidates, this.rotationStrategy);
+      }
+      log.warn(`阈值策略严格模式生效: 模型 ${modelId} 所有候选凭证均低于阈值，返回无可用凭证`);
+      return null;
     }
 
     return null;
@@ -1123,6 +1423,7 @@ class TokenManager {
     return {
       strategy: this.rotationStrategy,
       requestCount: this.requestCountPerToken,
+      thresholdPolicy: cloneThresholdPolicy(this.thresholdPolicy),
       currentIndex: this.currentIndex,
       tokenCounts: Object.fromEntries(this.tokenRequestCounts)
     };

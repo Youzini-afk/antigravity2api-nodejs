@@ -8,7 +8,18 @@
   },
   "rotation": {
     "strategy": "round_robin",
-    "requestCount": 50
+    "requestCount": 50,
+    "thresholdPolicy": {
+      "enabled": false,
+      "modelGroupPercent": 20,
+      "globalPercent": 20,
+      "applyStrategies": {
+        "round_robin": true,
+        "request_count": true,
+        "quota_exhausted": true
+      },
+      "allBelowThresholdAction": "strict"
+    }
   },
   "log": {
     "maxSizeMB": 10,

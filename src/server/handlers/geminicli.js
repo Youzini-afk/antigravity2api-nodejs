@@ -51,11 +51,11 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
   const { format, stream, cleanedBody } = normalized;
 
   try {
-    const token = await getToken();
+    const { geminiRequest, model: actualModel, features, sourceFormat } = convertToGeminiCli(cleanedBody);
+    const token = await getToken(actualModel);
     if (!token) {
       throw new Error('没有可用的 Gemini CLI token，请在管理页面添加账号');
     }
-    const { geminiRequest, model: actualModel, features, sourceFormat } = convertToGeminiCli(cleanedBody);
 
 
     // 保存原始请求的模型名称用于响应

@@ -12,6 +12,7 @@ import {
 import TokenStore from './token_store.js';
 import { TokenError } from '../utils/errors.js';
 import { getDataDir } from '../utils/paths.js';
+import quotaManager from './quota_manager.js';
 
 // Gemini CLI API 配置
 const GEMINICLI_API_CONFIG = {
@@ -26,6 +27,36 @@ const RotationStrategy = {
   QUOTA_EXHAUSTED: 'quota_exhausted',   // 额度耗尽才切换
   REQUEST_COUNT: 'request_count'        // 自定义次数后切换
 };
+
+const DEFAULT_THRESHOLD_POLICY = Object.freeze({
+  enabled: false,
+  modelGroupPercent: 20,
+  globalPercent: 20,
+  applyStrategies: {
+    round_robin: true,
+    request_count: true,
+    quota_exhausted: true
+  },
+  allBelowThresholdAction: 'strict'
+});
+
+function clampPercent(value, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  if (num < 0) return 0;
+  if (num > 100) return 100;
+  return num;
+}
+
+function cloneThresholdPolicy(policy) {
+  return {
+    enabled: policy.enabled,
+    modelGroupPercent: policy.modelGroupPercent,
+    globalPercent: policy.globalPercent,
+    applyStrategies: { ...policy.applyStrategies },
+    allBelowThresholdAction: policy.allBelowThresholdAction
+  };
+}
 
 /**
  * Gemini CLI Token 管理器
@@ -53,6 +84,8 @@ class GeminiCliTokenManager {
     this.requestCountPerToken = DEFAULT_REQUEST_COUNT_PER_TOKEN;
     /** @type {Map<string, number>} */
     this.tokenRequestCounts = new Map();
+    this.thresholdPolicy = cloneThresholdPolicy(DEFAULT_THRESHOLD_POLICY);
+    this.quotaRefreshInFlight = new Map();
 
     /** @type {Promise<void>|null} */
     this._initPromise = null;
@@ -175,28 +208,81 @@ class GeminiCliTokenManager {
     return this._initPromise;
   }
 
+  _normalizeThresholdPolicy(input) {
+    const base = cloneThresholdPolicy(DEFAULT_THRESHOLD_POLICY);
+    if (!input || typeof input !== 'object') return base;
+
+    if (typeof input.enabled === 'boolean') {
+      base.enabled = input.enabled;
+    }
+
+    base.modelGroupPercent = clampPercent(input.modelGroupPercent, base.modelGroupPercent);
+    base.globalPercent = clampPercent(input.globalPercent, base.globalPercent);
+
+    if (input.applyStrategies && typeof input.applyStrategies === 'object') {
+      const allowedKeys = ['round_robin', 'request_count', 'quota_exhausted'];
+      for (const key of allowedKeys) {
+        if (typeof input.applyStrategies[key] === 'boolean') {
+          base.applyStrategies[key] = input.applyStrategies[key];
+        }
+      }
+    }
+
+    if (input.allBelowThresholdAction === 'strict' || input.allBelowThresholdAction === 'fail_open') {
+      base.allBelowThresholdAction = input.allBelowThresholdAction;
+    }
+
+    return base;
+  }
+
+  _mergeThresholdPolicy(globalPolicyInput, cliPolicyInput) {
+    const globalPolicy = this._normalizeThresholdPolicy(globalPolicyInput);
+    if (!cliPolicyInput || typeof cliPolicyInput !== 'object') {
+      return globalPolicy;
+    }
+
+    return this._normalizeThresholdPolicy({
+      ...globalPolicy,
+      ...cliPolicyInput,
+      applyStrategies: {
+        ...globalPolicy.applyStrategies,
+        ...(cliPolicyInput.applyStrategies && typeof cliPolicyInput.applyStrategies === 'object'
+          ? cliPolicyInput.applyStrategies
+          : {})
+      }
+    });
+  }
+
   // 加载轮询策略配置
   loadRotationConfig() {
     try {
       const jsonConfig = getConfigJson();
       // 优先使用 geminicli 专属配置，否则使用全局配置
-      const rotationConfig = jsonConfig.geminicli?.rotation || jsonConfig.rotation;
-      if (rotationConfig) {
-        this.rotationStrategy = rotationConfig.strategy || RotationStrategy.ROUND_ROBIN;
-        this.requestCountPerToken = rotationConfig.requestCount || 10;
-      }
+      const globalRotation = jsonConfig.rotation || {};
+      const cliRotation = jsonConfig.geminicli?.rotation || {};
+      const rotationConfig = Object.keys(cliRotation).length > 0 ? cliRotation : globalRotation;
+
+      this.rotationStrategy = rotationConfig.strategy || RotationStrategy.ROUND_ROBIN;
+      this.requestCountPerToken = rotationConfig.requestCount || 10;
+      this.thresholdPolicy = this._mergeThresholdPolicy(
+        globalRotation.thresholdPolicy,
+        cliRotation.thresholdPolicy
+      );
     } catch (error) {
       log.warn('[GeminiCLI] 加载轮询配置失败，使用默认值:', error.message);
     }
   }
 
   // 更新轮询策略（热更新）
-  updateRotationConfig(strategy, requestCount) {
+  updateRotationConfig(strategy, requestCount, thresholdPolicy = undefined) {
     if (strategy && Object.values(RotationStrategy).includes(strategy)) {
       this.rotationStrategy = strategy;
     }
     if (requestCount && requestCount > 0) {
       this.requestCountPerToken = requestCount;
+    }
+    if (thresholdPolicy !== undefined) {
+      this.thresholdPolicy = this._normalizeThresholdPolicy(thresholdPolicy);
     }
     this.tokenRequestCounts.clear();
     if (this.rotationStrategy === RotationStrategy.REQUEST_COUNT) {
@@ -484,20 +570,224 @@ class GeminiCliTokenManager {
     return 'skip';
   }
 
+  _shouldApplyThresholdForStrategy(strategy) {
+    const policy = this.thresholdPolicy;
+    if (!policy?.enabled) return false;
+    const map = policy.applyStrategies || {};
+    return map[strategy] === true;
+  }
+
+  async _getTokenIdAsync(token) {
+    if (!token?.refresh_token) return null;
+    try {
+      const salt = this.store._salt || await this.store.getSalt();
+      if (!salt) return null;
+      return generateTokenId(token.refresh_token, salt);
+    } catch {
+      return null;
+    }
+  }
+
+  _buildQuotaFetchUrl() {
+    const geminicliConfig = config.geminicli?.api || {};
+    if (geminicliConfig.modelsUrl) return geminicliConfig.modelsUrl;
+    const host = geminicliConfig.host || GEMINICLI_API_CONFIG.HOST;
+    return `https://${host}/v1internal:fetchAvailableModels`;
+  }
+
+  _buildQuotaFetchHeaders(token) {
+    const geminicliConfig = config.geminicli?.api || {};
+    return {
+      'Host': geminicliConfig.host || GEMINICLI_API_CONFIG.HOST,
+      'User-Agent': geminicliConfig.userAgent || GEMINICLI_API_CONFIG.USER_AGENT,
+      'Authorization': `Bearer ${token.access_token}`,
+      'Content-Type': 'application/json',
+      'Accept-Encoding': 'gzip'
+    };
+  }
+
+  async _fetchModelsWithQuotas(token) {
+    const response = await httpRequest({
+      method: 'POST',
+      url: this._buildQuotaFetchUrl(),
+      headers: this._buildQuotaFetchHeaders(token),
+      data: {}
+    });
+
+    const data = response.data || {};
+    const quotas = {};
+    Object.entries(data.models || {}).forEach(([modelId, modelData]) => {
+      if (modelData?.quotaInfo) {
+        quotas[modelId] = {
+          r: modelData.quotaInfo.remainingFraction,
+          t: modelData.quotaInfo.resetTime
+        };
+      }
+    });
+    return quotas;
+  }
+
+  async _refreshQuotaSync(token, tokenId) {
+    if (!tokenId) return false;
+    if (this.quotaRefreshInFlight.has(tokenId)) {
+      return this.quotaRefreshInFlight.get(tokenId);
+    }
+
+    const task = (async () => {
+      try {
+        if (this.isExpired(token)) {
+          await this.refreshToken(token, true);
+        }
+        const quotas = await this._fetchModelsWithQuotas(token);
+        quotaManager.updateQuota(tokenId, quotas);
+        return true;
+      } catch (error) {
+        log.warn(`[GeminiCLI] 刷新额度失败(${tokenId}): ${error.message}`);
+        return false;
+      } finally {
+        this.quotaRefreshInFlight.delete(tokenId);
+      }
+    })();
+
+    this.quotaRefreshInFlight.set(tokenId, task);
+    return task;
+  }
+
+  _refreshQuotaAsync(token, tokenId) {
+    if (!tokenId) return;
+    if (this.quotaRefreshInFlight.has(tokenId)) return;
+    void this._refreshQuotaSync(token, tokenId);
+  }
+
+  async _ensureQuotaForThreshold(token, tokenId) {
+    if (!tokenId) return;
+    const fresh = quotaManager.getQuota(tokenId);
+    if (fresh) return;
+
+    const stale = quotaManager.getQuotaAnyAge(tokenId);
+    if (!stale) {
+      await this._refreshQuotaSync(token, tokenId);
+      return;
+    }
+
+    this._refreshQuotaAsync(token, tokenId);
+  }
+
+  async _evaluateThreshold(token, modelId) {
+    const policy = this.thresholdPolicy;
+    if (!policy?.enabled || !modelId) {
+      return { pass: true, reason: 'disabled' };
+    }
+
+    const tokenId = await this._getTokenIdAsync(token);
+    if (!tokenId) {
+      return { pass: true, reason: 'no_token_id' };
+    }
+
+    await this._ensureQuotaForThreshold(token, tokenId);
+
+    if (!quotaManager.hasQuotaData(tokenId)) {
+      return { pass: true, reason: 'no_quota_data' };
+    }
+
+    const modelGroupRemaining = quotaManager.getModelGroupQuota(tokenId, modelId);
+    const globalMin = quotaManager.getGlobalMinQuota(tokenId);
+    const globalRemaining = globalMin.hasData ? globalMin.remaining : 1;
+
+    const groupThreshold = policy.modelGroupPercent / 100;
+    const globalThreshold = policy.globalPercent / 100;
+
+    const groupBlocked = modelGroupRemaining <= groupThreshold;
+    const globalBlocked = globalRemaining <= globalThreshold;
+    if (!groupBlocked && !globalBlocked) {
+      return {
+        pass: true,
+        modelGroupRemaining,
+        globalRemaining
+      };
+    }
+
+    return {
+      pass: false,
+      reason: groupBlocked && globalBlocked ? 'group_and_global' : (groupBlocked ? 'group' : 'global'),
+      modelGroupRemaining,
+      globalRemaining,
+      groupThreshold,
+      globalThreshold
+    };
+  }
+
+  async _checkThresholdAndCollectFallback(token, modelId, fallbackCandidates, tokenIndex) {
+    const thresholdResult = await this._evaluateThreshold(token, modelId);
+    if (thresholdResult.pass) return true;
+
+    if (this.thresholdPolicy.allBelowThresholdAction === 'fail_open') {
+      fallbackCandidates.push(tokenIndex);
+    }
+    return false;
+  }
+
+  async _tryGetFallbackToken(fallbackCandidates, strategy = this.rotationStrategy) {
+    for (const tokenIndex of fallbackCandidates) {
+      const token = this.tokens[tokenIndex];
+      if (!token) continue;
+      try {
+        const result = await this._prepareToken(token);
+        if (result === 'disable') {
+          this.disableToken(token);
+          continue;
+        }
+
+        this.currentIndex = tokenIndex;
+        if (strategy === RotationStrategy.ROUND_ROBIN) {
+          this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
+        } else if (strategy === RotationStrategy.REQUEST_COUNT) {
+          const tokenKey = token.refresh_token;
+          const count = this.tokenRequestCounts.get(tokenKey) || 0;
+          if (count >= this.requestCountPerToken) {
+            this.resetRequestCount(tokenKey);
+            this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
+          }
+        }
+        return token;
+      } catch (error) {
+        const action = this._handleTokenError(error, token);
+        if (action === 'disable') {
+          this.disableToken(token);
+        }
+      }
+    }
+    return null;
+  }
+
   /**
    * 获取可用的 token
+   * @param {string|null} modelId - 请求模型ID（用于阈值判断）
    * @returns {Promise<Object|null>} token 对象
    */
-  async getToken() {
+  async getToken(modelId = null) {
     await this._ensureInitialized();
     if (this.tokens.length === 0) return null;
 
     const totalTokens = this.tokens.length;
     const startIndex = this.currentIndex;
+    const applyThreshold = modelId && this._shouldApplyThresholdForStrategy(this.rotationStrategy);
+    const fallbackCandidates = [];
+    let thresholdCheckedCount = 0;
+    let thresholdFilteredCount = 0;
 
     for (let i = 0; i < totalTokens; i++) {
       const index = (startIndex + i) % totalTokens;
       const token = this.tokens[index];
+
+      if (applyThreshold) {
+        thresholdCheckedCount++;
+        const pass = await this._checkThresholdAndCollectFallback(token, modelId, fallbackCandidates, index);
+        if (!pass) {
+          thresholdFilteredCount++;
+          continue;
+        }
+      }
 
       try {
         const result = await this._prepareToken(token);
@@ -531,6 +821,16 @@ class GeminiCliTokenManager {
         }
         // skip: 继续尝试下一个 token
       }
+    }
+
+    const allBelowThreshold = thresholdCheckedCount > 0 && thresholdFilteredCount === thresholdCheckedCount;
+    if (applyThreshold && allBelowThreshold) {
+      if (this.thresholdPolicy.allBelowThresholdAction === 'fail_open') {
+        log.warn(`[GeminiCLI] 阈值策略触发保底放行: 模型 ${modelId} 所有候选凭证均低于阈值，尝试保底选取`);
+        return this._tryGetFallbackToken(fallbackCandidates, this.rotationStrategy);
+      }
+      log.warn(`[GeminiCLI] 阈值策略严格模式生效: 模型 ${modelId} 所有候选凭证均低于阈值，返回无可用凭证`);
+      return null;
     }
 
     return null;
@@ -791,6 +1091,7 @@ class GeminiCliTokenManager {
     return {
       strategy: this.rotationStrategy,
       requestCount: this.requestCountPerToken,
+      thresholdPolicy: cloneThresholdPolicy(this.thresholdPolicy),
       currentIndex: this.currentIndex,
       tokenCounts: Object.fromEntries(this.tokenRequestCounts)
     };

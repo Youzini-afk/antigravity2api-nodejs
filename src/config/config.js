@@ -255,9 +255,75 @@ const DEFAULT_API_UNLEASH = {
 const DEFAULT_GEMINICLI_API_CONFIG = {
   url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
   noStreamUrl: 'https://cloudcode-pa.googleapis.com/v1internal:generateContent',
+  modelsUrl: 'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
   host: 'cloudcode-pa.googleapis.com',
   userAgent: 'GeminiCLI/0.1.5 (Windows; AMD64)'
 };
+
+const DEFAULT_THRESHOLD_POLICY = {
+  enabled: false,
+  modelGroupPercent: 20,
+  globalPercent: 20,
+  applyStrategies: {
+    round_robin: true,
+    request_count: true,
+    quota_exhausted: true
+  },
+  allBelowThresholdAction: 'strict'
+};
+
+function normalizeThresholdPolicy(policy) {
+  const base = JSON.parse(JSON.stringify(DEFAULT_THRESHOLD_POLICY));
+  if (!policy || typeof policy !== 'object') return base;
+
+  if (typeof policy.enabled === 'boolean') {
+    base.enabled = policy.enabled;
+  }
+
+  const normalizePercent = (value, fallback) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    if (num < 0) return 0;
+    if (num > 100) return 100;
+    return num;
+  };
+
+  base.modelGroupPercent = normalizePercent(policy.modelGroupPercent, base.modelGroupPercent);
+  base.globalPercent = normalizePercent(policy.globalPercent, base.globalPercent);
+
+  if (policy.applyStrategies && typeof policy.applyStrategies === 'object') {
+    const allowed = ['round_robin', 'request_count', 'quota_exhausted'];
+    for (const key of allowed) {
+      if (typeof policy.applyStrategies[key] === 'boolean') {
+        base.applyStrategies[key] = policy.applyStrategies[key];
+      }
+    }
+  }
+
+  if (policy.allBelowThresholdAction === 'strict' || policy.allBelowThresholdAction === 'fail_open') {
+    base.allBelowThresholdAction = policy.allBelowThresholdAction;
+  }
+
+  return base;
+}
+
+function mergeThresholdPolicyWithFallback(globalPolicyInput, cliPolicyInput) {
+  const globalPolicy = normalizeThresholdPolicy(globalPolicyInput);
+  if (!cliPolicyInput || typeof cliPolicyInput !== 'object') {
+    return globalPolicy;
+  }
+
+  return normalizeThresholdPolicy({
+    ...globalPolicy,
+    ...cliPolicyInput,
+    applyStrategies: {
+      ...globalPolicy.applyStrategies,
+      ...(cliPolicyInput.applyStrategies && typeof cliPolicyInput.applyStrategies === 'object'
+        ? cliPolicyInput.applyStrategies
+        : {})
+    }
+  });
+}
 
 /**
  * 获取当前使用的 API 配置（Antigravity）
@@ -295,6 +361,7 @@ function getGeminiCliApiConfig(jsonConfig) {
   return {
     url: customConfig?.url || DEFAULT_GEMINICLI_API_CONFIG.url,
     noStreamUrl: customConfig?.noStreamUrl || DEFAULT_GEMINICLI_API_CONFIG.noStreamUrl,
+    modelsUrl: customConfig?.modelsUrl || DEFAULT_GEMINICLI_API_CONFIG.modelsUrl,
     host: customConfig?.host || DEFAULT_GEMINICLI_API_CONFIG.host,
     userAgent: customConfig?.userAgent || DEFAULT_GEMINICLI_API_CONFIG.userAgent
   };
@@ -307,6 +374,11 @@ function getGeminiCliApiConfig(jsonConfig) {
  */
 export function buildConfig(jsonConfig) {
   const apiConfig = getActiveApiConfig(jsonConfig);
+  const globalThresholdPolicy = normalizeThresholdPolicy(jsonConfig.rotation?.thresholdPolicy);
+  const cliThresholdPolicy = mergeThresholdPolicyWithFallback(
+    jsonConfig.rotation?.thresholdPolicy,
+    jsonConfig.geminicli?.rotation?.thresholdPolicy
+  );
 
   return {
     server: {
@@ -321,7 +393,8 @@ export function buildConfig(jsonConfig) {
     },
     rotation: {
       strategy: jsonConfig.rotation?.strategy || 'round_robin',
-      requestCount: jsonConfig.rotation?.requestCount || 10
+      requestCount: jsonConfig.rotation?.requestCount || 10,
+      thresholdPolicy: globalThresholdPolicy
     },
     // 日志配置
     log: {
@@ -382,7 +455,8 @@ export function buildConfig(jsonConfig) {
       // Token 轮换策略
       rotation: {
         strategy: jsonConfig.geminicli?.rotation?.strategy || 'round_robin',
-        requestCount: jsonConfig.geminicli?.rotation?.requestCount || 10
+        requestCount: jsonConfig.geminicli?.rotation?.requestCount || 10,
+        thresholdPolicy: cliThresholdPolicy
       },
       // 默认生成参数（可覆盖全局默认值）
       defaults: {

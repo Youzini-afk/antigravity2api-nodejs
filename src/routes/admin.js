@@ -585,7 +585,7 @@ router.get('/rotation', cookieAuthMiddleware, (req, res) => {
 // 更新轮询策略配置
 router.put('/rotation', cookieAuthMiddleware, (req, res) => {
   try {
-    const { strategy, requestCount } = req.body;
+    const { strategy, requestCount, thresholdPolicy } = req.body;
 
     // 验证策略值
     const validStrategies = ['round_robin', 'quota_exhausted', 'request_count'];
@@ -596,20 +596,74 @@ router.put('/rotation', cookieAuthMiddleware, (req, res) => {
       });
     }
 
+    // 校验阈值策略配置
+    if (thresholdPolicy !== undefined) {
+      if (!thresholdPolicy || typeof thresholdPolicy !== 'object' || Array.isArray(thresholdPolicy)) {
+        return res.status(400).json({ success: false, message: 'thresholdPolicy 必须是对象' });
+      }
+
+      if (thresholdPolicy.enabled !== undefined && typeof thresholdPolicy.enabled !== 'boolean') {
+        return res.status(400).json({ success: false, message: 'thresholdPolicy.enabled 必须是布尔值' });
+      }
+
+      const validatePercent = (value, field) => {
+        if (value === undefined) return null;
+        const num = Number(value);
+        if (!Number.isFinite(num) || num < 0 || num > 100) {
+          return `${field} 必须是 0~100 的数字`;
+        }
+        return null;
+      };
+
+      const modelGroupErr = validatePercent(thresholdPolicy.modelGroupPercent, 'thresholdPolicy.modelGroupPercent');
+      if (modelGroupErr) {
+        return res.status(400).json({ success: false, message: modelGroupErr });
+      }
+
+      const globalErr = validatePercent(thresholdPolicy.globalPercent, 'thresholdPolicy.globalPercent');
+      if (globalErr) {
+        return res.status(400).json({ success: false, message: globalErr });
+      }
+
+      if (thresholdPolicy.applyStrategies !== undefined) {
+        if (!thresholdPolicy.applyStrategies || typeof thresholdPolicy.applyStrategies !== 'object' || Array.isArray(thresholdPolicy.applyStrategies)) {
+          return res.status(400).json({ success: false, message: 'thresholdPolicy.applyStrategies 必须是对象' });
+        }
+
+        const allowedApplyKeys = ['round_robin', 'request_count', 'quota_exhausted'];
+        for (const key of Object.keys(thresholdPolicy.applyStrategies)) {
+          if (!allowedApplyKeys.includes(key)) {
+            return res.status(400).json({ success: false, message: `thresholdPolicy.applyStrategies 包含无效键: ${key}` });
+          }
+          if (typeof thresholdPolicy.applyStrategies[key] !== 'boolean') {
+            return res.status(400).json({ success: false, message: `thresholdPolicy.applyStrategies.${key} 必须是布尔值` });
+          }
+        }
+      }
+
+      if (thresholdPolicy.allBelowThresholdAction !== undefined &&
+        thresholdPolicy.allBelowThresholdAction !== 'strict' &&
+        thresholdPolicy.allBelowThresholdAction !== 'fail_open') {
+        return res.status(400).json({ success: false, message: 'thresholdPolicy.allBelowThresholdAction 仅支持 strict 或 fail_open' });
+      }
+    }
+
     // 更新内存中的配置
-    tokenManager.updateRotationConfig(strategy, requestCount);
+    tokenManager.updateRotationConfig(strategy, requestCount, thresholdPolicy);
+    geminicliTokenManager.updateRotationConfig(strategy, requestCount, thresholdPolicy);
 
     // 保存到config.json
     const currentConfig = getConfigJson();
     if (!currentConfig.rotation) currentConfig.rotation = {};
     if (strategy) currentConfig.rotation.strategy = strategy;
     if (requestCount) currentConfig.rotation.requestCount = requestCount;
+    if (thresholdPolicy !== undefined) currentConfig.rotation.thresholdPolicy = thresholdPolicy;
     saveConfigJson(currentConfig);
 
     // 重载配置到内存
     reloadConfig();
 
-    logger.info(`轮询策略已更新: ${strategy || '未变'}, 请求次数: ${requestCount || '未变'}`);
+    logger.info(`轮询策略已更新: ${strategy || '未变'}, 请求次数: ${requestCount || '未变'}, 阈值策略: ${thresholdPolicy !== undefined ? '已更新' : '未变'}`);
     res.json({ success: true, message: '轮询策略已更新', data: tokenManager.getRotationConfig() });
   } catch (error) {
     logger.error('更新轮询配置失败:', error.message);
