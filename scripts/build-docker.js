@@ -9,10 +9,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const rootDir = path.resolve(__dirname, '..');
-const envFilePath = process.env.ENV_FILE_PATH || './.env.new';
-const configFilePath = process.env.CONFIG_FILE_PATH || './config.new.json';
-const dataDirPath = process.env.DATA_DIR || './data-new';
-const imagesDirPath = process.env.IMAGES_DIR || './public/images-new';
+const envFilePath = process.env.ENV_FILE_PATH || './.env';
+const configFilePath = process.env.CONFIG_FILE_PATH || './config.json';
+const dataDirPath = process.env.DATA_DIR || './data';
+const imagesDirPath = process.env.IMAGES_DIR || './public/images';
 
 const resolveLocalPath = (targetPath) => (
   path.isAbsolute(targetPath) ? targetPath : path.resolve(rootDir, targetPath)
@@ -26,7 +26,7 @@ const dataDir = resolveLocalPath(dataDirPath);
 const imagesDir = resolveLocalPath(imagesDirPath);
 
 console.log('🐳 开始构建 Docker 镜像...\n');
-console.log(`项目名: ${process.env.COMPOSE_PROJECT_NAME || 'antigravity2api-new'}`);
+console.log(`项目名: ${process.env.COMPOSE_PROJECT_NAME || 'antigravity2api'}`);
 console.log(`端口映射: ${process.env.HOST_PORT || '8046'}:8046`);
 console.log(`配置文件: ${configFilePath}`);
 console.log(`环境文件: ${envFilePath}\n`);

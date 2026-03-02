@@ -1,15 +1,15 @@
-name: ${COMPOSE_PROJECT_NAME:-antigravity2api-new}
+name: ${COMPOSE_PROJECT_NAME:-antigravity2api}
 
 services:
   antigravity2api:
     build: .
     env_file:
-      - ${ENV_FILE_PATH:-./.env.new}
+      - ${ENV_FILE_PATH:-./.env}
     ports:
       - "${HOST_PORT:-8046}:8046"
     volumes:
-      - ${DATA_DIR:-./data-new}:/app/data
-      - ${IMAGES_DIR:-./public/images-new}:/app/public/images
-      - ${ENV_FILE_PATH:-./.env.new}:/app/.env
-      - ${CONFIG_FILE_PATH:-./config.new.json}:/app/config.json
+      - ${DATA_DIR:-./data}:/app/data
+      - ${IMAGES_DIR:-./public/images}:/app/public/images
+      - ${ENV_FILE_PATH:-./.env}:/app/.env
+      - ${CONFIG_FILE_PATH:-./config.json}:/app/config.json
     restart: unless-stopped
