@@ -31,6 +31,31 @@ console.log(`端口映射: ${process.env.HOST_PORT || '8046'}:8046`);
 console.log(`配置文件: ${configFilePath}`);
 console.log(`环境文件: ${envFilePath}\n`);
 
+function ensureEnvDefaults(filePath, defaults) {
+  if (!fs.existsSync(filePath)) return;
+  let content = fs.readFileSync(filePath, 'utf8');
+  let changed = false;
+
+  const hasKey = (key) => {
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`^\\s*${escaped}\\s*=`, 'm');
+    return pattern.test(content);
+  };
+
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!hasKey(key)) {
+      if (!content.endsWith('\n')) content += '\n';
+      content += `${key}=${value}\n`;
+      changed = true;
+      console.log(`✓ 已补充默认环境变量: ${key}`);
+    }
+  }
+
+  if (changed) {
+    fs.writeFileSync(filePath, content, 'utf8');
+  }
+}
+
 // 确保配置文件目录存在
 const envDir = path.dirname(envFile);
 const configDir = path.dirname(configFile);
@@ -52,6 +77,14 @@ if (!fs.existsSync(envFile)) {
 } else {
   console.log('✓ .env 已存在');
 }
+
+// 确保基础登录和鉴权字段存在，避免首次部署无法确认默认账号
+ensureEnvDefaults(envFile, {
+  API_KEY: 'sk-text',
+  ADMIN_USERNAME: 'admin',
+  ADMIN_PASSWORD: 'admin123',
+  JWT_SECRET: 'your-jwt-secret-key-change-this-in-production'
+});
 
 // 检查并复制 config.json
 if (!fs.existsSync(configFile)) {

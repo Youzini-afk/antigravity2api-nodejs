@@ -274,6 +274,8 @@ npm run docker:build
 - 创建必要的目录（`data-new/`、`public/images-new/`）
 - 执行 `docker-compose build` 构建镜像
 
+构建完成后，请先编辑 `.env.new` 中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`，再启动容器。
+
 2. **启动服务**
 
 ```bash
@@ -444,7 +446,8 @@ ghcr.io/liuw1535/antigravity2api-nodejs
 ### 使用流程
 
 1. **登录系统**
-   - 使用 `.env` 中配置的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录
+   - 使用容器实际加载的环境文件中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录
+   - Docker Compose 默认读取 `ENV_FILE_PATH`（默认 `./.env.new`）
    - 登录成功后会自动保存 JWT Token 到浏览器
 
 2. **添加 Token**
