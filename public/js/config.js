@@ -413,6 +413,14 @@ async function saveConfig(e) {
         }
     });
 
+    // 轮询配置由 /admin/rotation 独立保存，避免 /admin/config 绕过轮询参数校验
+    const rotationPayload = jsonConfig.rotation && Object.keys(jsonConfig.rotation).length > 0
+        ? jsonConfig.rotation
+        : null;
+    if (rotationPayload) {
+        delete jsonConfig.rotation;
+    }
+
     showLoading('正在保存配置...');
 
     // 检查官方系统提示词是否真正修改了
@@ -425,7 +433,10 @@ async function saveConfig(e) {
     }
 
     // 构建请求体
-    const payload = { env: envConfig, json: jsonConfig };
+    const payload = { env: envConfig };
+    if (Object.keys(jsonConfig).length > 0) {
+        payload.json = jsonConfig;
+    }
     // 如果官方系统提示词真正修改了且已解锁有密码，带上密码用于后端验证
     if (promptChanged && unlockedPassword) {
         payload.password = unlockedPassword;
@@ -441,15 +452,27 @@ async function saveConfig(e) {
         });
 
         const data = await response.json();
+        if (!response.ok || !data.success) {
+            hideLoading();
+            showToast(data.message || `保存失败 (${response.status})`, 'error');
+            return;
+        }
 
-        if (jsonConfig.rotation && Object.keys(jsonConfig.rotation).length > 0) {
-            await authFetch('/admin/rotation', {
+        if (rotationPayload) {
+            const rotationResponse = await authFetch('/admin/rotation', {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(jsonConfig.rotation)
+                body: JSON.stringify(rotationPayload)
             });
+            const rotationData = await rotationResponse.json();
+            if (!rotationResponse.ok || !rotationData.success) {
+                hideLoading();
+                showToast(`基础配置已保存，但轮询配置保存失败: ${rotationData.message || rotationResponse.statusText}`, 'error');
+                await loadRotationStatus();
+                return;
+            }
         }
 
         // 保存安全配置
@@ -472,14 +495,10 @@ async function saveConfig(e) {
         }
 
         hideLoading();
-        if (data.success) {
-            showToast('配置已保存', 'success');
-            // 保存成功后重新锁定
-            lockOfficialSystemPrompt();
-            loadConfig();
-        } else {
-            showToast(data.message || '保存失败', 'error');
-        }
+        showToast('配置已保存', 'success');
+        // 保存成功后重新锁定
+        lockOfficialSystemPrompt();
+        loadConfig();
     } catch (error) {
         hideLoading();
         showToast('保存失败: ' + error.message, 'error');

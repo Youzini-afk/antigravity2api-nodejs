@@ -436,7 +436,19 @@ curl -X PUT http://localhost:8046/admin/rotation \
   -H "Authorization: Bearer JWT_TOKEN" \
   -d '{
     "strategy": "request_count",
-    "requestCount": 20
+    "requestCount": 20,
+    "thresholdPolicy": {
+      "enabled": true,
+      "modelGroupPercent": 20,
+      "globalPercent": 20,
+      "crossModelGlobalBlock": false,
+      "applyStrategies": {
+        "round_robin": true,
+        "request_count": true,
+        "quota_exhausted": true
+      },
+      "allBelowThresholdAction": "strict"
+    }
   }'
 ```
 
@@ -444,6 +456,12 @@ curl -X PUT http://localhost:8046/admin/rotation \
 - `round_robin`：每次请求切换 Token
 - `quota_exhausted`：额度耗尽才切换
 - `request_count`：自定义请求次数后切换
+
+**参数说明**：
+- `requestCount` 必须是大于 0 的整数
+- `thresholdPolicy.crossModelGlobalBlock=false` 时，仅按请求模型组阈值过滤
+- `thresholdPolicy.crossModelGlobalBlock=true` 时，启用跨模型全局最小额度阻断
+- 该接口只热更新主 Token 池；GeminiCLI 池运行态不受影响
 
 ### 配置管理
 
@@ -464,6 +482,8 @@ curl -X PUT http://localhost:8046/admin/config \
     }
   }'
 ```
+
+> 注意：`rotation` 字段不支持通过 `/admin/config` 更新，请使用 `/admin/rotation`。
 
 ## 使用示例
 

@@ -534,6 +534,14 @@ router.put('/config', cookieAuthMiddleware, (req, res) => {
   try {
     const { env: envUpdates, json: jsonUpdates, password } = req.body;
 
+    // 轮询配置必须走 /admin/rotation，避免绕过参数校验
+    if (jsonUpdates?.rotation !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'rotation 配置请使用 /admin/rotation 接口更新'
+      });
+    }
+
     // 安全检查：如果修改了官方系统提示词，必须验证密码
     if (envUpdates && envUpdates.OFFICIAL_SYSTEM_PROMPT !== undefined) {
       const currentEnv = parseEnvFile(envPath);
@@ -586,6 +594,7 @@ router.get('/rotation', cookieAuthMiddleware, (req, res) => {
 router.put('/rotation', cookieAuthMiddleware, (req, res) => {
   try {
     const { strategy, requestCount, thresholdPolicy } = req.body;
+    const normalizedRequestCount = requestCount === undefined ? undefined : Number(requestCount);
 
     // 验证策略值
     const validStrategies = ['round_robin', 'quota_exhausted', 'request_count'];
@@ -593,6 +602,12 @@ router.put('/rotation', cookieAuthMiddleware, (req, res) => {
       return res.status(400).json({
         success: false,
         message: `无效的策略，可选值: ${validStrategies.join(', ')}`
+      });
+    }
+    if (requestCount !== undefined && (!Number.isInteger(normalizedRequestCount) || normalizedRequestCount <= 0)) {
+      return res.status(400).json({
+        success: false,
+        message: 'requestCount 必须是大于 0 的整数'
       });
     }
 
@@ -651,23 +666,39 @@ router.put('/rotation', cookieAuthMiddleware, (req, res) => {
       }
     }
 
-    // 更新内存中的配置
-    tokenManager.updateRotationConfig(strategy, requestCount, thresholdPolicy);
-    geminicliTokenManager.updateRotationConfig(strategy, requestCount, thresholdPolicy);
+    // 部分更新阈值策略时与当前配置合并，避免未传字段被默认值覆盖
+    const currentRotation = tokenManager.getRotationConfig();
+    let mergedThresholdPolicy = undefined;
+    if (thresholdPolicy !== undefined) {
+      mergedThresholdPolicy = {
+        ...(currentRotation.thresholdPolicy || {}),
+        ...thresholdPolicy,
+        applyStrategies: {
+          ...(currentRotation.thresholdPolicy?.applyStrategies || {}),
+          ...(thresholdPolicy.applyStrategies && typeof thresholdPolicy.applyStrategies === 'object'
+            ? thresholdPolicy.applyStrategies
+            : {})
+        }
+      };
+    }
+
+    // 仅更新主池运行态；GeminiCLI 池保持独立，不随主池轮询接口热更新
+    tokenManager.updateRotationConfig(strategy, normalizedRequestCount, mergedThresholdPolicy);
+    const updatedRotation = tokenManager.getRotationConfig();
 
     // 保存到config.json
     const currentConfig = getConfigJson();
     if (!currentConfig.rotation) currentConfig.rotation = {};
-    if (strategy) currentConfig.rotation.strategy = strategy;
-    if (requestCount) currentConfig.rotation.requestCount = requestCount;
-    if (thresholdPolicy !== undefined) currentConfig.rotation.thresholdPolicy = thresholdPolicy;
+    if (strategy) currentConfig.rotation.strategy = updatedRotation.strategy;
+    if (normalizedRequestCount !== undefined) currentConfig.rotation.requestCount = updatedRotation.requestCount;
+    if (thresholdPolicy !== undefined) currentConfig.rotation.thresholdPolicy = updatedRotation.thresholdPolicy;
     saveConfigJson(currentConfig);
 
     // 重载配置到内存
     reloadConfig();
 
-    logger.info(`轮询策略已更新: ${strategy || '未变'}, 请求次数: ${requestCount || '未变'}, 阈值策略: ${thresholdPolicy !== undefined ? '已更新' : '未变'}`);
-    res.json({ success: true, message: '轮询策略已更新', data: tokenManager.getRotationConfig() });
+    logger.info(`主池轮询策略已更新: ${strategy || '未变'}, 请求次数: ${normalizedRequestCount ?? '未变'}, 阈值策略: ${thresholdPolicy !== undefined ? '已更新' : '未变'}`);
+    res.json({ success: true, message: '主池轮询策略已更新', data: updatedRotation });
   } catch (error) {
     logger.error('更新轮询配置失败:', error.message);
     res.status(500).json({ success: false, message: error.message });
