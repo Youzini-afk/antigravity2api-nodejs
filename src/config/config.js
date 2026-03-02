@@ -264,6 +264,7 @@ const DEFAULT_THRESHOLD_POLICY = {
   enabled: false,
   modelGroupPercent: 20,
   globalPercent: 20,
+  crossModelGlobalBlock: false,
   applyStrategies: {
     round_robin: true,
     request_count: true,
@@ -278,6 +279,9 @@ function normalizeThresholdPolicy(policy) {
 
   if (typeof policy.enabled === 'boolean') {
     base.enabled = policy.enabled;
+  }
+  if (typeof policy.crossModelGlobalBlock === 'boolean') {
+    base.crossModelGlobalBlock = policy.crossModelGlobalBlock;
   }
 
   const normalizePercent = (value, fallback) => {

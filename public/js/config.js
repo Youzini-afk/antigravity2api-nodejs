@@ -113,7 +113,8 @@ async function loadRotationStatus() {
                     statusText += ` (每${requestCount}次)`;
                 }
                 if (thresholdPolicy?.enabled) {
-                    statusText += ` | 阈值: 组<=${thresholdPolicy.modelGroupPercent}% 全局<=${thresholdPolicy.globalPercent}%`;
+                    const crossModelMode = thresholdPolicy.crossModelGlobalBlock === true ? '开' : '关';
+                    statusText += ` | 阈值: 组<=${thresholdPolicy.modelGroupPercent}% 全局<=${thresholdPolicy.globalPercent}% 跨模型:${crossModelMode}`;
                 }
                 statusText += ` | 当前索引: ${currentIndex}`;
                 statusEl.textContent = statusText;
@@ -201,6 +202,9 @@ async function loadConfig() {
                 }
                 if (form.elements['ROTATION_THRESHOLD_GLOBAL_PERCENT']) {
                     form.elements['ROTATION_THRESHOLD_GLOBAL_PERCENT'].value = thresholdPolicy.globalPercent ?? 20;
+                }
+                if (form.elements['ROTATION_THRESHOLD_CROSS_MODEL_GLOBAL_BLOCK']) {
+                    form.elements['ROTATION_THRESHOLD_CROSS_MODEL_GLOBAL_BLOCK'].checked = thresholdPolicy.crossModelGlobalBlock === true;
                 }
                 if (form.elements['ROTATION_THRESHOLD_APPLY_ROUND_ROBIN']) {
                     form.elements['ROTATION_THRESHOLD_APPLY_ROUND_ROBIN'].checked = thresholdPolicy.applyStrategies?.round_robin !== false;
@@ -348,6 +352,7 @@ async function saveConfig(e) {
         enabled: form.elements['ROTATION_THRESHOLD_ENABLED']?.checked || false,
         modelGroupPercent,
         globalPercent,
+        crossModelGlobalBlock: form.elements['ROTATION_THRESHOLD_CROSS_MODEL_GLOBAL_BLOCK']?.checked || false,
         applyStrategies: {
             round_robin: form.elements['ROTATION_THRESHOLD_APPLY_ROUND_ROBIN']?.checked ?? true,
             request_count: form.elements['ROTATION_THRESHOLD_APPLY_REQUEST_COUNT']?.checked ?? true,
@@ -386,6 +391,7 @@ async function saveConfig(e) {
             else if (key === 'ROTATION_THRESHOLD_ENABLED' ||
                 key === 'ROTATION_THRESHOLD_MODEL_GROUP_PERCENT' ||
                 key === 'ROTATION_THRESHOLD_GLOBAL_PERCENT' ||
+                key === 'ROTATION_THRESHOLD_CROSS_MODEL_GLOBAL_BLOCK' ||
                 key === 'ROTATION_THRESHOLD_APPLY_ROUND_ROBIN' ||
                 key === 'ROTATION_THRESHOLD_APPLY_REQUEST_COUNT' ||
                 key === 'ROTATION_THRESHOLD_APPLY_QUOTA_EXHAUSTED' ||

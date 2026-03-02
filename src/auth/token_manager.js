@@ -24,6 +24,7 @@ const DEFAULT_THRESHOLD_POLICY = Object.freeze({
   enabled: false,
   modelGroupPercent: 20,
   globalPercent: 20,
+  crossModelGlobalBlock: false,
   applyStrategies: {
     round_robin: true,
     request_count: true,
@@ -45,6 +46,7 @@ function cloneThresholdPolicy(policy) {
     enabled: policy.enabled,
     modelGroupPercent: policy.modelGroupPercent,
     globalPercent: policy.globalPercent,
+    crossModelGlobalBlock: policy.crossModelGlobalBlock,
     applyStrategies: { ...policy.applyStrategies },
     allBelowThresholdAction: policy.allBelowThresholdAction
   };
@@ -212,6 +214,9 @@ class TokenManager {
 
     if (typeof input.enabled === 'boolean') {
       base.enabled = input.enabled;
+    }
+    if (typeof input.crossModelGlobalBlock === 'boolean') {
+      base.crossModelGlobalBlock = input.crossModelGlobalBlock;
     }
 
     base.modelGroupPercent = clampPercent(input.modelGroupPercent, base.modelGroupPercent);
@@ -918,14 +923,18 @@ class TokenManager {
     }
 
     const modelGroupRemaining = quotaManager.getModelGroupQuota(tokenId, modelId);
-    const globalMin = quotaManager.getGlobalMinQuota(tokenId);
-    const globalRemaining = globalMin.hasData ? globalMin.remaining : 1;
-
     const groupThreshold = policy.modelGroupPercent / 100;
     const globalThreshold = policy.globalPercent / 100;
 
     const groupBlocked = modelGroupRemaining <= groupThreshold;
-    const globalBlocked = globalRemaining <= globalThreshold;
+    let globalBlocked = false;
+    let globalRemaining;
+    if (policy.crossModelGlobalBlock === true) {
+      const globalMin = quotaManager.getGlobalMinQuota(tokenId);
+      globalRemaining = globalMin.hasData ? globalMin.remaining : 1;
+      globalBlocked = globalRemaining <= globalThreshold;
+    }
+
     if (!groupBlocked && !globalBlocked) {
       return {
         pass: true,

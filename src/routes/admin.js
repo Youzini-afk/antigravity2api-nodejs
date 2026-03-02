@@ -605,6 +605,9 @@ router.put('/rotation', cookieAuthMiddleware, (req, res) => {
       if (thresholdPolicy.enabled !== undefined && typeof thresholdPolicy.enabled !== 'boolean') {
         return res.status(400).json({ success: false, message: 'thresholdPolicy.enabled 必须是布尔值' });
       }
+      if (thresholdPolicy.crossModelGlobalBlock !== undefined && typeof thresholdPolicy.crossModelGlobalBlock !== 'boolean') {
+        return res.status(400).json({ success: false, message: 'thresholdPolicy.crossModelGlobalBlock 必须是布尔值' });
+      }
 
       const validatePercent = (value, field) => {
         if (value === undefined) return null;

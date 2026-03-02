@@ -13,6 +13,7 @@
       "enabled": false,
       "modelGroupPercent": 20,
       "globalPercent": 20,
+      "crossModelGlobalBlock": false,
       "applyStrategies": {
         "round_robin": true,
         "request_count": true,
