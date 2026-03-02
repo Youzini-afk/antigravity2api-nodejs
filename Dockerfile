@@ -18,7 +18,7 @@ RUN cp .env.example .env
 RUN mkdir -p data public/images
 
 # 暴露端口
-EXPOSE 8045
+EXPOSE 8046
 
 # 启动应用
 CMD ["sh", "-c", "node src/config/init-env.js && npm start"]

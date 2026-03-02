@@ -55,19 +55,19 @@ echo ========================================
 echo.
 echo Available services:
 echo.
-echo 1. Web UI: http://127.0.0.1:8045
+echo 1. Web UI: http://127.0.0.1:8046
 echo    - Username: %ADMIN_USER%
 echo    - Password: %ADMIN_PASS%
 echo    - Login first to configure Antigravity or Gemini CLI credentials
 echo.
 echo 2. Antigravity API endpoints:
-echo    - OpenAI format: http://127.0.0.1:8045/v1
-echo    - Gemini format: http://127.0.0.1:8045/v1beta
-echo    - Claude format: http://127.0.0.1:8045/v1
+echo    - OpenAI format: http://127.0.0.1:8046/v1
+echo    - Gemini format: http://127.0.0.1:8046/v1beta
+echo    - Claude format: http://127.0.0.1:8046/v1
 echo.
 echo 3. Gemini CLI API endpoints:
-echo    - OpenAI format: http://127.0.0.1:8045/cli/v1
-echo    - Gemini format: http://127.0.0.1:8045/cli/v1beta
+echo    - OpenAI format: http://127.0.0.1:8046/cli/v1
+echo    - Gemini format: http://127.0.0.1:8046/cli/v1beta
 echo.
 echo ========================================
 echo.

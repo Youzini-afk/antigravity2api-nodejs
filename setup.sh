@@ -57,19 +57,19 @@ echo "========================================"
 echo
 echo "可用服务："
 echo
-echo "1. 管理界面: http://127.0.0.1:8045"
+echo "1. 管理界面: http://127.0.0.1:8046"
 echo "   - 使用账号: $ADMIN_USER"
 echo "   - 使用密码: $ADMIN_PASS"
 echo "   - 请先登录配置反重力或 Gemini CLI 凭证"
 echo
 echo "2. 反重力 API 端口:"
-echo "   - OpenAI 格式: http://127.0.0.1:8045/v1"
-echo "   - Gemini 格式: http://127.0.0.1:8045/v1beta"
-echo "   - Claude 格式: http://127.0.0.1:8045/v1"
+echo "   - OpenAI 格式: http://127.0.0.1:8046/v1"
+echo "   - Gemini 格式: http://127.0.0.1:8046/v1beta"
+echo "   - Claude 格式: http://127.0.0.1:8046/v1"
 echo
 echo "3. Gemini CLI API 端口:"
-echo "   - OpenAI 格式: http://127.0.0.1:8045/cli/v1"
-echo "   - Gemini 格式: http://127.0.0.1:8045/cli/v1beta"
+echo "   - OpenAI 格式: http://127.0.0.1:8046/cli/v1"
+echo "   - Gemini 格式: http://127.0.0.1:8046/cli/v1beta"
 echo
 echo "========================================"
 echo

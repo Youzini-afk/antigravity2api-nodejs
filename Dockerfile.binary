@@ -90,7 +90,7 @@ EOF
 RUN chmod +x /app/entrypoint.sh
 
 # 暴露端口
-EXPOSE 8045
+EXPOSE 8046
 
 # 启动应用
 CMD ["/app/entrypoint.sh"]

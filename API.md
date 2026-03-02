@@ -10,7 +10,7 @@
 Authorization: Bearer YOUR_API_KEY
 ```
 
-默认服务地址：`http://localhost:8045`
+默认服务地址：`http://localhost:8046`
 
 ## 目录
 
@@ -27,7 +27,7 @@ Authorization: Bearer YOUR_API_KEY
 ## 获取模型列表
 
 ```bash
-curl http://localhost:8045/v1/models \
+curl http://localhost:8046/v1/models \
   -H "Authorization: Bearer sk-text"
 ```
 
@@ -38,7 +38,7 @@ curl http://localhost:8045/v1/models \
 ### 流式响应
 
 ```bash
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:8046/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-text" \
   -d '{
@@ -51,7 +51,7 @@ curl http://localhost:8045/v1/chat/completions \
 ### 非流式响应
 
 ```bash
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:8046/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-text" \
   -d '{
@@ -64,7 +64,7 @@ curl http://localhost:8045/v1/chat/completions \
 ## 工具调用（Function Calling）
 
 ```bash
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:8046/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-text" \
   -d '{
@@ -92,7 +92,7 @@ curl http://localhost:8045/v1/chat/completions \
 支持 Base64 编码的图片输入，兼容 OpenAI 的多模态格式：
 
 ```bash
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:8046/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-text" \
   -d '{
@@ -125,7 +125,7 @@ curl http://localhost:8045/v1/chat/completions \
 支持使用 `gemini-3-pro-image` 模型生成图片，生成的图片会以 Markdown 格式返回：
 
 ```bash
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:8046/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-text" \
   -d '{
@@ -141,7 +141,7 @@ curl http://localhost:8045/v1/chat/completions \
   "choices": [{
     "message": {
       "role": "assistant",
-      "content": "![image](http://localhost:8045/images/abc123.png)"
+      "content": "![image](http://localhost:8046/images/abc123.png)"
     }
   }]
 }
@@ -233,7 +233,7 @@ API 返回标准的 HTTP 状态码：
 ### 使用 reasoning_effort（OpenAI 兼容格式）
 
 ```bash
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:8046/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-text" \
   -d '{
@@ -253,7 +253,7 @@ curl http://localhost:8045/v1/chat/completions \
 ### 使用 thinking_budget（直接数值）
 
 ```bash
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:8046/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-text" \
   -d '{
@@ -324,7 +324,7 @@ data: {"choices":[{"delta":{"content":"量子纠缠是..."}}]}
 ### 文本生成图片
 
 ```bash
-curl http://localhost:8045/sdapi/v1/txt2img \
+curl http://localhost:8046/sdapi/v1/txt2img \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "a cute cat, high quality, detailed",
@@ -338,7 +338,7 @@ curl http://localhost:8045/sdapi/v1/txt2img \
 ### 图片生成图片
 
 ```bash
-curl http://localhost:8045/sdapi/v1/img2img \
+curl http://localhost:8046/sdapi/v1/img2img \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "enhance this image, high quality",
@@ -364,7 +364,7 @@ curl http://localhost:8045/sdapi/v1/img2img \
 ### 登录
 
 ```bash
-curl http://localhost:8045/admin/login \
+curl http://localhost:8046/admin/login \
   -H "Content-Type: application/json" \
   -d '{
     "username": "admin",
@@ -376,11 +376,11 @@ curl http://localhost:8045/admin/login \
 
 ```bash
 # 获取 Token 列表
-curl http://localhost:8045/admin/tokens \
+curl http://localhost:8046/admin/tokens \
   -H "Authorization: Bearer JWT_TOKEN"
 
 # 添加 Token
-curl http://localhost:8045/admin/tokens \
+curl http://localhost:8046/admin/tokens \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer JWT_TOKEN" \
   -d '{
@@ -390,7 +390,7 @@ curl http://localhost:8045/admin/tokens \
   }'
 
 # 删除 Token
-curl -X DELETE http://localhost:8045/admin/tokens/REFRESH_TOKEN \
+curl -X DELETE http://localhost:8046/admin/tokens/REFRESH_TOKEN \
   -H "Authorization: Bearer JWT_TOKEN"
 ```
 
@@ -398,11 +398,11 @@ curl -X DELETE http://localhost:8045/admin/tokens/REFRESH_TOKEN \
 
 ```bash
 # 获取指定 Token 的模型额度
-curl http://localhost:8045/admin/tokens/REFRESH_TOKEN/quotas \
+curl http://localhost:8046/admin/tokens/REFRESH_TOKEN/quotas \
   -H "Authorization: Bearer JWT_TOKEN"
 
 # 强制刷新额度数据
-curl "http://localhost:8045/admin/tokens/REFRESH_TOKEN/quotas?refresh=true" \
+curl "http://localhost:8046/admin/tokens/REFRESH_TOKEN/quotas?refresh=true" \
   -H "Authorization: Bearer JWT_TOKEN"
 ```
 
@@ -427,11 +427,11 @@ curl "http://localhost:8045/admin/tokens/REFRESH_TOKEN/quotas?refresh=true" \
 
 ```bash
 # 获取当前轮询配置
-curl http://localhost:8045/admin/rotation \
+curl http://localhost:8046/admin/rotation \
   -H "Authorization: Bearer JWT_TOKEN"
 
 # 更新轮询策略
-curl -X PUT http://localhost:8045/admin/rotation \
+curl -X PUT http://localhost:8046/admin/rotation \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer JWT_TOKEN" \
   -d '{
@@ -449,11 +449,11 @@ curl -X PUT http://localhost:8045/admin/rotation \
 
 ```bash
 # 获取配置
-curl http://localhost:8045/admin/config \
+curl http://localhost:8046/admin/config \
   -H "Authorization: Bearer JWT_TOKEN"
 
 # 更新配置
-curl -X PUT http://localhost:8045/admin/config \
+curl -X PUT http://localhost:8046/admin/config \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer JWT_TOKEN" \
   -d '{
@@ -472,7 +472,7 @@ curl -X PUT http://localhost:8045/admin/config \
 ```python
 import openai
 
-openai.api_base = "http://localhost:8045/v1"
+openai.api_base = "http://localhost:8046/v1"
 openai.api_key = "sk-text"
 
 response = openai.ChatCompletion.create(
@@ -491,7 +491,7 @@ for chunk in response:
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
-  baseURL: 'http://localhost:8045/v1',
+  baseURL: 'http://localhost:8046/v1',
   apiKey: 'sk-text'
 });
 

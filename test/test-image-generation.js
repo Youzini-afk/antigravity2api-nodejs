@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const API_URL = 'http://localhost:8045/v1/chat/completions';
+const API_URL = 'http://localhost:8046/v1/chat/completions';
 const API_KEY = 'sk-text';
 
 async function testImageGeneration(stream = true) {

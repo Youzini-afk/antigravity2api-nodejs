@@ -147,7 +147,7 @@ npm run login
 npm start
 ```
 
-服务将在 `http://localhost:8045` 启动。
+服务将在 `http://localhost:8046` 启动。
 
 ## 二进制文件部署（推荐）
 
@@ -313,7 +313,7 @@ docker build -t antigravity2api .
 ```bash
 docker run -d \
   --name antigravity2api \
-  -p 8045:8045 \
+  -p 8046:8046 \
   -e API_KEY=sk-text \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=admin123 \
@@ -337,7 +337,7 @@ docker logs -f antigravity2api
 - 数据持久化：`data/` 目录挂载到容器，保存 Token 数据
 - 图片存储：`public/images/` 目录挂载到容器，保存生成的图片
 - 配置文件：`.env` 和 `config.json` 挂载到容器，支持热更新
-- 端口映射：默认映射 8045 端口，可根据需要修改
+- 端口映射：默认映射 8046 端口，可根据需要修改
 - 自动重启：容器异常退出会自动重启
 
 ## Zeabur 部署
@@ -397,7 +397,7 @@ ghcr.io/liuw1535/antigravity2api-nodejs
 
 ## Web 管理界面
 
-服务启动后，访问 `http://localhost:8045` 即可打开 Web 管理界面。
+服务启动后，访问 `http://localhost:8046` 即可打开 Web 管理界面。
 
 ### 功能特性
 
@@ -488,7 +488,7 @@ ghcr.io/liuw1535/antigravity2api-nodejs
 ### 快速测试
 
 ```bash
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:8046/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-text" \
   -d '{
@@ -539,7 +539,7 @@ curl http://localhost:8045/v1/chat/completions \
 ```json
 {
   "server": {
-    "port": 8045,              // 服务端口
+    "port": 8046,              // 服务端口
     "host": "0.0.0.0",         // 监听地址
     "maxRequestSize": "500mb", // 最大请求体大小
     "heartbeatInterval": 15000,// 心跳间隔（毫秒），防止 Cloudflare 超时
