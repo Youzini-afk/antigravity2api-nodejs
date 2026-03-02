@@ -300,19 +300,19 @@ docker compose down
 
 ```bash
 COMPOSE_PROJECT_NAME=antigravity2api-alt \
-HOST_PORT=8047 \
-ENV_FILE_PATH=./.env.alt \
-CONFIG_FILE_PATH=./config.alt.json \
-DATA_DIR=./data-alt \
-IMAGES_DIR=./public/images-alt \
+COMPOSE_HOST_PORT=8047 \
+COMPOSE_ENV_FILE_PATH=./.env.alt \
+COMPOSE_CONFIG_FILE_PATH=./config.alt.json \
+COMPOSE_DATA_DIR=./data-alt \
+COMPOSE_IMAGES_DIR=./public/images-alt \
 npm run docker:build
 
 COMPOSE_PROJECT_NAME=antigravity2api-alt \
-HOST_PORT=8047 \
-ENV_FILE_PATH=./.env.alt \
-CONFIG_FILE_PATH=./config.alt.json \
-DATA_DIR=./data-alt \
-IMAGES_DIR=./public/images-alt \
+COMPOSE_HOST_PORT=8047 \
+COMPOSE_ENV_FILE_PATH=./.env.alt \
+COMPOSE_CONFIG_FILE_PATH=./config.alt.json \
+COMPOSE_DATA_DIR=./data-alt \
+COMPOSE_IMAGES_DIR=./public/images-alt \
 docker compose up -d
 ```
 
@@ -447,7 +447,7 @@ ghcr.io/liuw1535/antigravity2api-nodejs
 
 1. **登录系统**
    - 使用容器实际加载的环境文件中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录
-   - Docker Compose 默认读取 `ENV_FILE_PATH`（默认 `./.env`）
+   - Docker Compose 默认读取 `COMPOSE_ENV_FILE_PATH`（默认 `./.env`）
    - 登录成功后会自动保存 JWT Token 到浏览器
 
 2. **添加 Token**

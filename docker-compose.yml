@@ -2,12 +2,12 @@ services:
   antigravity2api:
     build: .
     env_file:
-      - ${ENV_FILE_PATH:-./.env}
+      - ${COMPOSE_ENV_FILE_PATH:-./.env}
     ports:
-      - "${HOST_PORT:-8046}:8046"
+      - "${COMPOSE_HOST_PORT:-8046}:8046"
     volumes:
-      - ${DATA_DIR:-./data}:/app/data
-      - ${IMAGES_DIR:-./public/images}:/app/public/images
-      - ${ENV_FILE_PATH:-./.env}:/app/.env
-      - ${CONFIG_FILE_PATH:-./config.json}:/app/config.json
+      - ${COMPOSE_DATA_DIR:-./data}:/app/data
+      - ${COMPOSE_IMAGES_DIR:-./public/images}:/app/public/images
+      - ${COMPOSE_ENV_FILE_PATH:-./.env}:/app/.env
+      - ${COMPOSE_CONFIG_FILE_PATH:-./config.json}:/app/config.json
     restart: unless-stopped

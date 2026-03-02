@@ -9,10 +9,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const rootDir = path.resolve(__dirname, '..');
-const envFilePath = process.env.ENV_FILE_PATH || './.env';
-const configFilePath = process.env.CONFIG_FILE_PATH || './config.json';
-const dataDirPath = process.env.DATA_DIR || './data';
-const imagesDirPath = process.env.IMAGES_DIR || './public/images';
+const envFilePath = process.env.COMPOSE_ENV_FILE_PATH || process.env.ENV_FILE_PATH || './.env';
+const configFilePath = process.env.COMPOSE_CONFIG_FILE_PATH || process.env.CONFIG_FILE_PATH || './config.json';
+const dataDirPath = process.env.COMPOSE_DATA_DIR || process.env.DATA_DIR || './data';
+const imagesDirPath = process.env.COMPOSE_IMAGES_DIR || process.env.IMAGES_DIR || './public/images';
+const hostPort = process.env.COMPOSE_HOST_PORT || process.env.HOST_PORT || '8046';
 
 const resolveLocalPath = (targetPath) => (
   path.isAbsolute(targetPath) ? targetPath : path.resolve(rootDir, targetPath)
@@ -27,9 +28,11 @@ const imagesDir = resolveLocalPath(imagesDirPath);
 
 console.log('🐳 开始构建 Docker 镜像...\n');
 console.log(`项目名: ${process.env.COMPOSE_PROJECT_NAME || 'antigravity2api'}`);
-console.log(`端口映射: ${process.env.HOST_PORT || '8046'}:8046`);
+console.log(`端口映射: ${hostPort}:8046`);
 console.log(`配置文件: ${configFilePath}`);
 console.log(`环境文件: ${envFilePath}\n`);
+console.log(`环境文件绝对路径: ${envFile}`);
+console.log(`配置文件绝对路径: ${configFile}\n`);
 
 function normalizeEnvKeys(filePath, defaults) {
   if (!fs.existsSync(filePath)) return;
