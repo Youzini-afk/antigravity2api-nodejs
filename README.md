@@ -269,9 +269,9 @@ npm run docker:build
 ```
 
 该命令会自动：
-- 从 `.env.example` 创建 `.env`（如果不存在）
-- 从 `config.json.example` 创建 `config.json`（如果不存在）
-- 创建必要的目录（`data/`、`public/images/`）
+- 从 `.env.example` 创建 `.env.new`（如果不存在）
+- 从 `config.json.example` 创建 `config.new.json`（如果不存在）
+- 创建必要的目录（`data-new/`、`public/images-new/`）
 - 执行 `docker-compose build` 构建镜像
 
 2. **启动服务**
@@ -292,17 +292,39 @@ docker compose logs -f
 docker compose down
 ```
 
+#### 与旧容器并行运行（推荐）
+
+若你需要保留旧版容器并同时启动当前新版测试容器，可使用独立项目名和挂载路径：
+
+```bash
+COMPOSE_PROJECT_NAME=antigravity2api-new \
+HOST_PORT=8046 \
+ENV_FILE_PATH=./.env.new \
+CONFIG_FILE_PATH=./config.new.json \
+DATA_DIR=./data-new \
+IMAGES_DIR=./public/images-new \
+npm run docker:build
+
+COMPOSE_PROJECT_NAME=antigravity2api-new \
+HOST_PORT=8046 \
+ENV_FILE_PATH=./.env.new \
+CONFIG_FILE_PATH=./config.new.json \
+DATA_DIR=./data-new \
+IMAGES_DIR=./public/images-new \
+docker compose up -d
+```
+
 ### 手动构建
 
 如果需要手动构建，请先准备配置文件：
 
 ```bash
 # 复制配置文件
-cp .env.example .env
-cp config.json.example config.json
+cp .env.example .env.new
+cp config.json.example config.new.json
 
 # 创建必要目录
-mkdir -p data public/images
+mkdir -p data-new public/images-new
 
 # 构建镜像
 docker build -t antigravity2api .
@@ -312,31 +334,31 @@ docker build -t antigravity2api .
 
 ```bash
 docker run -d \
-  --name antigravity2api \
+  --name antigravity2api-new \
   -p 8046:8046 \
   -e API_KEY=sk-text \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=admin123 \
   -e JWT_SECRET=your-jwt-secret-key \
   -e IMAGE_BASE_URL=http://your-domain.com \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/public/images:/app/public/images \
-  -v $(pwd)/.env:/app/.env \
-  -v $(pwd)/config.json:/app/config.json \
+  -v $(pwd)/data-new:/app/data \
+  -v $(pwd)/public/images-new:/app/public/images \
+  -v $(pwd)/.env.new:/app/.env \
+  -v $(pwd)/config.new.json:/app/config.json \
   antigravity2api
 ```
 
 3. **查看日志**
 
 ```bash
-docker logs -f antigravity2api
+docker logs -f antigravity2api-new
 ```
 
 ### Docker 部署说明
 
-- 数据持久化：`data/` 目录挂载到容器，保存 Token 数据
-- 图片存储：`public/images/` 目录挂载到容器，保存生成的图片
-- 配置文件：`.env` 和 `config.json` 挂载到容器，支持热更新
+- 数据持久化：默认 `data-new/` 目录挂载到容器，保存 Token 数据
+- 图片存储：默认 `public/images-new/` 目录挂载到容器，保存生成的图片
+- 配置文件：默认 `.env.new` 和 `config.new.json` 挂载到容器，支持热更新
 - 端口映射：默认映射 8046 端口，可根据需要修改
 - 自动重启：容器异常退出会自动重启
 

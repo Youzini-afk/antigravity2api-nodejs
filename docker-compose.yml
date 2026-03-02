@@ -1,10 +1,10 @@
-version: '3.8'
+name: ${COMPOSE_PROJECT_NAME:-antigravity2api-new}
 
 services:
   antigravity2api:
     build: .
     ports:
-      - "8046:8046"
+      - "${HOST_PORT:-8046}:8046"
     environment:
       - API_KEY=${API_KEY:-sk-text}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
@@ -14,8 +14,8 @@ services:
       - SYSTEM_INSTRUCTION=${SYSTEM_INSTRUCTION:-}
       - IMAGE_BASE_URL=${IMAGE_BASE_URL:-}
     volumes:
-      - ./data:/app/data
-      - ./public/images:/app/public/images
-      - ./.env:/app/.env
-      - ./config.json:/app/config.json
+      - ${DATA_DIR:-./data-new}:/app/data
+      - ${IMAGES_DIR:-./public/images-new}:/app/public/images
+      - ${ENV_FILE_PATH:-./.env.new}:/app/.env
+      - ${CONFIG_FILE_PATH:-./config.new.json}:/app/config.json
     restart: unless-stopped

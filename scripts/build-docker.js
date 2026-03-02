@@ -9,12 +9,37 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const rootDir = path.resolve(__dirname, '..');
-const envFile = path.join(rootDir, '.env');
-const configFile = path.join(rootDir, 'config.json');
+const envFilePath = process.env.ENV_FILE_PATH || './.env.new';
+const configFilePath = process.env.CONFIG_FILE_PATH || './config.new.json';
+const dataDirPath = process.env.DATA_DIR || './data-new';
+const imagesDirPath = process.env.IMAGES_DIR || './public/images-new';
+
+const resolveLocalPath = (targetPath) => (
+  path.isAbsolute(targetPath) ? targetPath : path.resolve(rootDir, targetPath)
+);
+
+const envFile = resolveLocalPath(envFilePath);
+const configFile = resolveLocalPath(configFilePath);
 const envExample = path.join(rootDir, '.env.example');
 const configExample = path.join(rootDir, 'config.json.example');
+const dataDir = resolveLocalPath(dataDirPath);
+const imagesDir = resolveLocalPath(imagesDirPath);
 
 console.log('🐳 开始构建 Docker 镜像...\n');
+console.log(`项目名: ${process.env.COMPOSE_PROJECT_NAME || 'antigravity2api-new'}`);
+console.log(`端口映射: ${process.env.HOST_PORT || '8046'}:8046`);
+console.log(`配置文件: ${configFilePath}`);
+console.log(`环境文件: ${envFilePath}\n`);
+
+// 确保配置文件目录存在
+const envDir = path.dirname(envFile);
+const configDir = path.dirname(configFile);
+if (!fs.existsSync(envDir)) {
+  fs.mkdirSync(envDir, { recursive: true });
+}
+if (!fs.existsSync(configDir)) {
+  fs.mkdirSync(configDir, { recursive: true });
+}
 
 // 检查并复制 .env
 if (!fs.existsSync(envFile)) {
@@ -41,9 +66,6 @@ if (!fs.existsSync(configFile)) {
 }
 
 // 确保必要的目录存在（防止 Docker 挂载时创建文件夹）
-const dataDir = path.join(rootDir, 'data');
-const imagesDir = path.join(rootDir, 'public', 'images');
-
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
   console.log('✓ 已创建 data 目录');
