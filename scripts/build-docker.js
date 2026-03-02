@@ -65,9 +65,9 @@ function normalizeEnvKeys(filePath, defaults) {
       continue;
     }
 
-    // 去重：保留首个有效定义，移除后续重复项，避免 dotenv 读取到尾部旧值覆盖新值
+    // 去重：保留最后一个有效定义（dotenv 语义），移除前面的重复项
     if (activeIndexes.length > 1) {
-      for (let i = activeIndexes.length - 1; i >= 1; i--) {
+      for (let i = activeIndexes.length - 2; i >= 0; i--) {
         lines.splice(activeIndexes[i], 1);
       }
       changed = true;
