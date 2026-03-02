@@ -31,28 +31,52 @@ console.log(`端口映射: ${process.env.HOST_PORT || '8046'}:8046`);
 console.log(`配置文件: ${configFilePath}`);
 console.log(`环境文件: ${envFilePath}\n`);
 
-function ensureEnvDefaults(filePath, defaults) {
+function normalizeEnvKeys(filePath, defaults) {
   if (!fs.existsSync(filePath)) return;
-  let content = fs.readFileSync(filePath, 'utf8');
+  const content = fs.readFileSync(filePath, 'utf8');
+  const newline = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content.split(/\r?\n/);
   let changed = false;
 
-  const hasKey = (key) => {
-    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`^\\s*${escaped}\\s*=`, 'm');
-    return pattern.test(content);
-  };
-
   for (const [key, value] of Object.entries(defaults)) {
-    if (!hasKey(key)) {
-      if (!content.endsWith('\n')) content += '\n';
-      content += `${key}=${value}\n`;
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const activePattern = new RegExp(`^\\s*${escapedKey}\\s*=`);
+    const commentedPattern = new RegExp(`^\\s*#\\s*${escapedKey}\\s*=`);
+
+    const activeIndexes = [];
+    let commentedIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (activePattern.test(line)) {
+        activeIndexes.push(i);
+      } else if (commentedIndex === -1 && commentedPattern.test(line)) {
+        commentedIndex = i;
+      }
+    }
+
+    if (activeIndexes.length === 0) {
+      if (commentedIndex !== -1) {
+        lines[commentedIndex] = `${key}=${value}`;
+      } else {
+        lines.push(`${key}=${value}`);
+      }
       changed = true;
       console.log(`✓ 已补充默认环境变量: ${key}`);
+      continue;
+    }
+
+    // 去重：保留首个有效定义，移除后续重复项，避免 dotenv 读取到尾部旧值覆盖新值
+    if (activeIndexes.length > 1) {
+      for (let i = activeIndexes.length - 1; i >= 1; i--) {
+        lines.splice(activeIndexes[i], 1);
+      }
+      changed = true;
+      console.log(`✓ 已清理重复环境变量: ${key}`);
     }
   }
 
   if (changed) {
-    fs.writeFileSync(filePath, content, 'utf8');
+    fs.writeFileSync(filePath, lines.join(newline), 'utf8');
   }
 }
 
@@ -78,8 +102,8 @@ if (!fs.existsSync(envFile)) {
   console.log('✓ .env 已存在');
 }
 
-// 确保基础登录和鉴权字段存在，避免首次部署无法确认默认账号
-ensureEnvDefaults(envFile, {
+// 确保基础登录和鉴权字段存在，并修复重复键导致的覆盖问题
+normalizeEnvKeys(envFile, {
   API_KEY: 'sk-text',
   ADMIN_USERNAME: 'admin',
   ADMIN_PASSWORD: 'admin123',
