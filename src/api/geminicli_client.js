@@ -241,10 +241,12 @@ export async function generateNoStreamResponse(requestBody, token, model) {
 /**
  * 获取可用的 Token
  * @param {string|null} modelId - 模型 ID（用于阈值判断）
+ * @param {Object} [options]
+ * @param {boolean} [options.bypassThreshold=false] - 是否跳过阈值过滤
  * @returns {Promise<Object|null>} Token 对象
  */
-export async function getToken(modelId = null) {
-  return geminicliTokenManager.getToken(modelId);
+export async function getToken(modelId = null, options = {}) {
+  return geminicliTokenManager.getToken(modelId, options);
 }
 
 /**

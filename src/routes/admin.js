@@ -138,6 +138,19 @@ function verifyPassword(password) {
   return password === config.admin.password;
 }
 
+function validateOptionalBoolean(value, fieldPath) {
+  if (value !== undefined && typeof value !== 'boolean') {
+    return `${fieldPath} 必须是布尔值`;
+  }
+  return null;
+}
+
+function parseOptionalBoolean(value) {
+  if (value === true || value === 'true' || value === 1 || value === '1') return true;
+  if (value === false || value === 'false' || value === 0 || value === '0') return false;
+  return undefined;
+}
+
 // Token管理API - 需要JWT认证（使用 Cookie 优先）
 router.get('/tokens', cookieAuthMiddleware, async (req, res) => {
   try {
@@ -150,15 +163,37 @@ router.get('/tokens', cookieAuthMiddleware, async (req, res) => {
 });
 
 router.post('/tokens', cookieAuthMiddleware, async (req, res) => {
-  const { access_token, refresh_token, expires_in, timestamp, enable, projectId, email } = req.body;
+  const {
+    access_token,
+    refresh_token,
+    expires_in,
+    timestamp,
+    enable,
+    projectId,
+    email,
+    useThreshold,
+    allowBypassWithSpecialKey
+  } = req.body;
   if (!access_token || !refresh_token) {
     return res.status(400).json({ success: false, message: 'access_token和refresh_token必填' });
   }
+
+  const useThresholdErr = validateOptionalBoolean(useThreshold, 'useThreshold');
+  if (useThresholdErr) {
+    return res.status(400).json({ success: false, message: useThresholdErr });
+  }
+  const allowBypassErr = validateOptionalBoolean(allowBypassWithSpecialKey, 'allowBypassWithSpecialKey');
+  if (allowBypassErr) {
+    return res.status(400).json({ success: false, message: allowBypassErr });
+  }
+
   const tokenData = { access_token, refresh_token, expires_in };
   if (timestamp) tokenData.timestamp = timestamp;
   if (enable !== undefined) tokenData.enable = enable;
   if (projectId) tokenData.projectId = projectId;
   if (email) tokenData.email = email;
+  if (useThreshold !== undefined) tokenData.useThreshold = useThreshold;
+  if (allowBypassWithSpecialKey !== undefined) tokenData.allowBypassWithSpecialKey = allowBypassWithSpecialKey;
 
   try {
     const result = await tokenManager.addToken(tokenData);
@@ -178,6 +213,15 @@ router.put('/tokens/:tokenId', cookieAuthMiddleware, async (req, res) => {
   // 不允许通过 API 更新敏感字段
   delete updates.access_token;
   delete updates.refresh_token;
+
+  const useThresholdErr = validateOptionalBoolean(updates.useThreshold, 'useThreshold');
+  if (useThresholdErr) {
+    return res.status(400).json({ success: false, message: useThresholdErr });
+  }
+  const allowBypassErr = validateOptionalBoolean(updates.allowBypassWithSpecialKey, 'allowBypassWithSpecialKey');
+  if (allowBypassErr) {
+    return res.status(400).json({ success: false, message: allowBypassErr });
+  }
 
   try {
     const result = await tokenManager.updateTokenById(tokenId, updates);
@@ -264,7 +308,9 @@ router.post('/tokens/export', cookieAuthMiddleware, async (req, res) => {
         enable: token.enable,
         projectId: token.projectId,
         email: token.email,
-        hasQuota: token.hasQuota
+        hasQuota: token.hasQuota,
+        useThreshold: token.useThreshold !== false,
+        allowBypassWithSpecialKey: token.allowBypassWithSpecialKey !== false
       }))
     };
 
@@ -308,6 +354,16 @@ function smartParseToken(rawToken) {
   const enable = findFieldByKeyword(rawToken, 'enable');
   const timestamp = findFieldByKeyword(rawToken, 'time') || findFieldByKeyword(rawToken, 'stamp');
   const hasQuota = findFieldByKeyword(rawToken, 'quota');
+  const useThreshold = parseOptionalBoolean(
+    rawToken.useThreshold ??
+    rawToken.use_threshold ??
+    findFieldByKeyword(rawToken, 'useThreshold')
+  );
+  const allowBypassWithSpecialKey = parseOptionalBoolean(
+    rawToken.allowBypassWithSpecialKey ??
+    rawToken.allow_bypass_with_special_key ??
+    findFieldByKeyword(rawToken, 'allowBypassWithSpecialKey')
+  );
 
   if (access_token) token.access_token = access_token;
   if (email) token.email = email;
@@ -315,6 +371,8 @@ function smartParseToken(rawToken) {
   if (enable !== undefined) token.enable = enable === true || enable === 'true' || enable === 1;
   if (timestamp) token.timestamp = typeof timestamp === 'number' ? timestamp : new Date(timestamp).getTime();
   if (hasQuota !== undefined) token.hasQuota = hasQuota === true || hasQuota === 'true' || hasQuota === 1;
+  if (useThreshold !== undefined) token.useThreshold = useThreshold;
+  if (allowBypassWithSpecialKey !== undefined) token.allowBypassWithSpecialKey = allowBypassWithSpecialKey;
 
   return token;
 }
@@ -408,6 +466,16 @@ function smartParseGeminiCliToken(rawToken) {
   const timestamp = findFieldByKeyword(rawToken, 'time') || findFieldByKeyword(rawToken, 'stamp') || findFieldByKeyword(rawToken, 'created');
   const expiry = findFieldByKeyword(rawToken, 'expiry') || findFieldByKeyword(rawToken, 'expiresat');
   const projectId = findFieldByKeyword(rawToken, 'project');
+  const useThreshold = parseOptionalBoolean(
+    rawToken.useThreshold ??
+    rawToken.use_threshold ??
+    findFieldByKeyword(rawToken, 'useThreshold')
+  );
+  const allowBypassWithSpecialKey = parseOptionalBoolean(
+    rawToken.allowBypassWithSpecialKey ??
+    rawToken.allow_bypass_with_special_key ??
+    findFieldByKeyword(rawToken, 'allowBypassWithSpecialKey')
+  );
 
   if (access_token) token.access_token = access_token;
   if (email) token.email = email;
@@ -417,6 +485,8 @@ function smartParseGeminiCliToken(rawToken) {
   token.expires_in = derived.expires_in;
   token.timestamp = derived.timestamp;
   token.enable = parseGeminiCliEnable(rawToken);
+  if (useThreshold !== undefined) token.useThreshold = useThreshold;
+  if (allowBypassWithSpecialKey !== undefined) token.allowBypassWithSpecialKey = allowBypassWithSpecialKey;
 
   return token;
 }
@@ -766,14 +836,35 @@ router.get('/geminicli/tokens', cookieAuthMiddleware, async (req, res) => {
 
 // 添加 Gemini CLI Token
 router.post('/geminicli/tokens', cookieAuthMiddleware, async (req, res) => {
-  const { access_token, refresh_token, expires_in, timestamp, enable, email } = req.body;
+  const {
+    access_token,
+    refresh_token,
+    expires_in,
+    timestamp,
+    enable,
+    email,
+    projectId,
+    useThreshold,
+    allowBypassWithSpecialKey
+  } = req.body;
   if (!access_token || !refresh_token) {
     return res.status(400).json({ success: false, message: 'access_token和refresh_token必填' });
+  }
+  const useThresholdErr = validateOptionalBoolean(useThreshold, 'useThreshold');
+  if (useThresholdErr) {
+    return res.status(400).json({ success: false, message: useThresholdErr });
+  }
+  const allowBypassErr = validateOptionalBoolean(allowBypassWithSpecialKey, 'allowBypassWithSpecialKey');
+  if (allowBypassErr) {
+    return res.status(400).json({ success: false, message: allowBypassErr });
   }
   const tokenData = { access_token, refresh_token, expires_in };
   if (timestamp) tokenData.timestamp = timestamp;
   if (enable !== undefined) tokenData.enable = enable;
   if (email) tokenData.email = email;
+  if (projectId) tokenData.projectId = projectId;
+  if (useThreshold !== undefined) tokenData.useThreshold = useThreshold;
+  if (allowBypassWithSpecialKey !== undefined) tokenData.allowBypassWithSpecialKey = allowBypassWithSpecialKey;
 
   try {
     const result = await geminicliTokenManager.addToken(tokenData);
@@ -793,6 +884,15 @@ router.put('/geminicli/tokens/:tokenId', cookieAuthMiddleware, async (req, res) 
   // 不允许通过 API 更新敏感字段
   delete updates.access_token;
   delete updates.refresh_token;
+
+  const useThresholdErr = validateOptionalBoolean(updates.useThreshold, 'useThreshold');
+  if (useThresholdErr) {
+    return res.status(400).json({ success: false, message: useThresholdErr });
+  }
+  const allowBypassErr = validateOptionalBoolean(updates.allowBypassWithSpecialKey, 'allowBypassWithSpecialKey');
+  if (allowBypassErr) {
+    return res.status(400).json({ success: false, message: allowBypassErr });
+  }
 
   try {
     const result = await geminicliTokenManager.updateTokenById(tokenId, updates);
@@ -879,7 +979,9 @@ router.post('/geminicli/tokens/export', cookieAuthMiddleware, async (req, res) =
         timestamp: token.timestamp,
         enable: token.enable,
         email: token.email,
-        projectId: token.projectId
+        projectId: token.projectId,
+        useThreshold: token.useThreshold !== false,
+        allowBypassWithSpecialKey: token.allowBypassWithSpecialKey !== false
       }))
     };
 

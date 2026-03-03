@@ -33,6 +33,11 @@ const DEFAULT_THRESHOLD_POLICY = Object.freeze({
   allBelowThresholdAction: 'strict'
 });
 
+const DEFAULT_TOKEN_THRESHOLD_CONTROL = Object.freeze({
+  useThreshold: true,
+  allowBypassWithSpecialKey: true
+});
+
 function clampPercent(value, fallback) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
@@ -50,6 +55,20 @@ function cloneThresholdPolicy(policy) {
     applyStrategies: { ...policy.applyStrategies },
     allBelowThresholdAction: policy.allBelowThresholdAction
   };
+}
+
+function normalizeTokenThresholdControl(input) {
+  const result = { ...DEFAULT_TOKEN_THRESHOLD_CONTROL };
+  if (!input || typeof input !== 'object') return result;
+
+  if (typeof input.useThreshold === 'boolean') {
+    result.useThreshold = input.useThreshold;
+  }
+  if (typeof input.allowBypassWithSpecialKey === 'boolean') {
+    result.allowBypassWithSpecialKey = input.allowBypassWithSpecialKey;
+  }
+
+  return result;
 }
 
 /**
@@ -94,6 +113,7 @@ class TokenManager {
 
       this.tokens = tokenArray.filter(token => token.enable !== false).map(token => ({
         ...token,
+        ...normalizeTokenThresholdControl(token),
         sessionId: generateSessionId(),
         instanceId: generateInstanceId()
       }));
@@ -966,6 +986,20 @@ class TokenManager {
     return false;
   }
 
+  _shouldApplyThresholdForToken(token, bypassThreshold) {
+    const tokenPolicy = normalizeTokenThresholdControl(token);
+    if (tokenPolicy.useThreshold !== true) {
+      return false;
+    }
+
+    // 双重允许才绕过：请求是特殊 key 且凭证允许绕过
+    if (bypassThreshold === true && tokenPolicy.allowBypassWithSpecialKey === true) {
+      return false;
+    }
+
+    return true;
+  }
+
   async _tryGetFallbackToken(fallbackCandidates, strategy = this.rotationStrategy) {
     for (const tokenIndex of fallbackCandidates) {
       const token = this.tokens[tokenIndex];
@@ -1001,26 +1035,29 @@ class TokenManager {
   /**
    * 获取可用的 token
    * @param {string} [modelId] - 可选，请求的模型 ID，用于检查该模型的额度
+   * @param {Object} [options]
+   * @param {boolean} [options.bypassThreshold=false] - 是否跳过阈值过滤
    * @returns {Promise<Object|null>} token 对象
    */
-  async getToken(modelId = null) {
+  async getToken(modelId = null, options = {}) {
     await this._ensureInitialized();
     if (this.tokens.length === 0) return null;
 
     // 针对额度耗尽策略做单独的高性能处理
     if (this.rotationStrategy === RotationStrategy.QUOTA_EXHAUSTED) {
-      return this._getTokenForQuotaExhaustedStrategy(modelId);
+      return this._getTokenForQuotaExhaustedStrategy(modelId, options);
     }
 
-    return this._getTokenForDefaultStrategy(modelId);
+    return this._getTokenForDefaultStrategy(modelId, options);
   }
 
   /**
    * 额度耗尽策略的 token 获取
    * @param {string} [modelId] - 请求的模型 ID
+   * @param {Object} [options]
    * @private
    */
-  async _getTokenForQuotaExhaustedStrategy(modelId = null) {
+  async _getTokenForQuotaExhaustedStrategy(modelId = null, options = {}) {
     // 如果当前没有可用 token，尝试重置额度
     if (this.availableQuotaTokenIndices.length === 0) {
       this._resetAllQuotas();
@@ -1036,7 +1073,8 @@ class TokenManager {
     if (modelId) {
       allTokensExhausted = this._checkAllTokensExhaustedForModel(modelId);
     }
-    const applyThreshold = modelId && this._shouldApplyThresholdForStrategy(RotationStrategy.QUOTA_EXHAUSTED);
+    const applyThresholdForStrategy = modelId &&
+      this._shouldApplyThresholdForStrategy(RotationStrategy.QUOTA_EXHAUSTED);
     const fallbackCandidates = [];
     let thresholdCheckedCount = 0;
     let thresholdFilteredCount = 0;
@@ -1055,6 +1093,9 @@ class TokenManager {
           continue;
         }
       }
+
+      const applyThreshold = applyThresholdForStrategy &&
+        this._shouldApplyThresholdForToken(token, options.bypassThreshold === true);
 
       if (applyThreshold) {
         thresholdCheckedCount++;
@@ -1093,7 +1134,7 @@ class TokenManager {
     }
 
     const allBelowThreshold = thresholdCheckedCount > 0 && thresholdFilteredCount === thresholdCheckedCount;
-    if (applyThreshold && allBelowThreshold) {
+    if (applyThresholdForStrategy && allBelowThreshold) {
       if (this.thresholdPolicy.allBelowThresholdAction === 'fail_open') {
         log.warn(`阈值策略触发保底放行: 模型 ${modelId} 所有候选凭证均低于阈值，尝试保底选取`);
         const fallbackToken = await this._tryGetFallbackToken(fallbackCandidates, RotationStrategy.QUOTA_EXHAUSTED);
@@ -1116,9 +1157,10 @@ class TokenManager {
   /**
    * 默认策略（round_robin / request_count）的 token 获取
    * @param {string} [modelId] - 请求的模型 ID
+   * @param {Object} [options]
    * @private
    */
-  async _getTokenForDefaultStrategy(modelId = null) {
+  async _getTokenForDefaultStrategy(modelId = null, options = {}) {
     const totalTokens = this.tokens.length;
     const startIndex = this.currentIndex;
 
@@ -1127,7 +1169,8 @@ class TokenManager {
     if (modelId) {
       allTokensExhausted = this._checkAllTokensExhaustedForModel(modelId);
     }
-    const applyThreshold = modelId && this._shouldApplyThresholdForStrategy(this.rotationStrategy);
+    const applyThresholdForStrategy = modelId &&
+      this._shouldApplyThresholdForStrategy(this.rotationStrategy);
     const fallbackCandidates = [];
     let thresholdCheckedCount = 0;
     let thresholdFilteredCount = 0;
@@ -1143,6 +1186,9 @@ class TokenManager {
           continue;
         }
       }
+
+      const applyThreshold = applyThresholdForStrategy &&
+        this._shouldApplyThresholdForToken(token, options.bypassThreshold === true);
 
       if (applyThreshold) {
         thresholdCheckedCount++;
@@ -1189,7 +1235,7 @@ class TokenManager {
     }
 
     const allBelowThreshold = thresholdCheckedCount > 0 && thresholdFilteredCount === thresholdCheckedCount;
-    if (applyThreshold && allBelowThreshold) {
+    if (applyThresholdForStrategy && allBelowThreshold) {
       if (this.thresholdPolicy.allBelowThresholdAction === 'fail_open') {
         log.warn(`阈值策略触发保底放行: 模型 ${modelId} 所有候选凭证均低于阈值，尝试保底选取`);
         return this._tryGetFallbackToken(fallbackCandidates, this.rotationStrategy);
@@ -1224,7 +1270,13 @@ class TokenManager {
         refresh_token: tokenData.refresh_token,
         expires_in: tokenData.expires_in || 3599,
         timestamp: tokenData.timestamp || Date.now(),
-        enable: tokenData.enable !== undefined ? tokenData.enable : true
+        enable: tokenData.enable !== undefined ? tokenData.enable : true,
+        useThreshold: tokenData.useThreshold !== undefined
+          ? tokenData.useThreshold
+          : DEFAULT_TOKEN_THRESHOLD_CONTROL.useThreshold,
+        allowBypassWithSpecialKey: tokenData.allowBypassWithSpecialKey !== undefined
+          ? tokenData.allowBypassWithSpecialKey
+          : DEFAULT_TOKEN_THRESHOLD_CONTROL.allowBypassWithSpecialKey
       };
 
       if (tokenData.projectId) {
@@ -1293,6 +1345,7 @@ class TokenManager {
       const salt = await this.store.getSalt();
 
       return allTokens.map(token => ({
+        ...normalizeTokenThresholdControl(token),
         // 使用安全的 tokenId 替代完整的 refresh_token
         id: generateTokenId(token.refresh_token, salt),
         expires_in: token.expires_in,

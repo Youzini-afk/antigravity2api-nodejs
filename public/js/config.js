@@ -320,7 +320,7 @@ async function saveConfig(e) {
     const formData = new FormData(form);
     const allConfig = Object.fromEntries(formData);
 
-    const sensitiveKeys = ['API_KEY', 'ADMIN_USERNAME', 'ADMIN_PASSWORD', 'JWT_SECRET', 'PROXY', 'SYSTEM_INSTRUCTION', 'OFFICIAL_SYSTEM_PROMPT', 'IMAGE_BASE_URL'];
+    const sensitiveKeys = ['API_KEY', 'BYPASS_THRESHOLD_API_KEYS', 'ADMIN_USERNAME', 'ADMIN_PASSWORD', 'JWT_SECRET', 'PROXY', 'SYSTEM_INSTRUCTION', 'OFFICIAL_SYSTEM_PROMPT', 'IMAGE_BASE_URL'];
     const envConfig = {};
     const jsonConfig = {
         server: {},

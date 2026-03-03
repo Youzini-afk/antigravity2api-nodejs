@@ -42,6 +42,34 @@ function getApiKey() {
   return generatedApiKey;
 }
 
+/**
+ * 解析阈值绕过 API Key 列表
+ * 支持逗号分隔或换行分隔，自动 trim、去重、忽略空项
+ * @returns {string[]}
+ */
+function parseBypassThresholdApiKeys() {
+  const raw = process.env.BYPASS_THRESHOLD_API_KEYS;
+  if (!raw || typeof raw !== 'string') {
+    return [];
+  }
+
+  const normalizedRaw = raw
+    .replace(/\r\n/g, '\n')
+    .replace(/\\n/g, '\n');
+  const parts = normalizedRaw.split(/[\n,]/);
+  const result = [];
+  const seen = new Set();
+
+  for (const part of parts) {
+    const value = part.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+
+  return result;
+}
+
 // 是否已显示过凭据提示
 let credentialsDisplayed = false;
 
@@ -129,6 +157,7 @@ if (!fs.existsSync(envPath)) {
   const defaultEnvContent = `# 敏感配置（只在 .env 中配置）
 # 如果不配置以下三项，系统会自动生成随机凭据并在启动时显示
 # API_KEY=your-api-key
+# BYPASS_THRESHOLD_API_KEYS=sk-vip-1,sk-vip-2
 # ADMIN_USERNAME=your-username
 # ADMIN_PASSWORD=your-password
 # JWT_SECRET=your-jwt-secret
@@ -418,7 +447,8 @@ export function buildConfig(jsonConfig) {
     },
     security: {
       maxRequestSize: jsonConfig.server?.maxRequestSize || DEFAULT_MAX_REQUEST_SIZE,
-      apiKey: getApiKey()
+      apiKey: getApiKey(),
+      bypassThresholdApiKeys: parseBypassThresholdApiKeys()
     },
     admin: getAdminCredentials(),
     useNativeAxios: jsonConfig.other?.useNativeAxios !== false,

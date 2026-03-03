@@ -9,6 +9,7 @@
 - ✅ 结构化 JSON 输出支持（response_format）
 - ✅ 工具调用（Function Calling）支持
 - ✅ 多账号自动轮换（支持多种轮询策略）
+- ✅ 凭证级阈值控制（每个账号可独立启停阈值/允许特殊Key绕过）
 - ✅ Token 自动刷新
 - ✅ API Key 认证
 - ✅ 思维链（Thinking）输出，兼容 OpenAI reasoning_effort 参数和 DeepSeek reasoning_content 格式
@@ -123,6 +124,7 @@ cp config.json.example config.json
 ```env
 # 必填配置（留空则自动生成随机凭据）
 API_KEY=sk-text
+BYPASS_THRESHOLD_API_KEYS=sk-vip-1,sk-vip-2
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 JWT_SECRET=your-jwt-secret-key-change-this-in-production
@@ -196,6 +198,7 @@ npm start
 
 ```env
 API_KEY=sk-your-api-key
+BYPASS_THRESHOLD_API_KEYS=sk-vip-1,sk-vip-2
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 JWT_SECRET=your-jwt-secret-key-change-this-in-production
@@ -339,6 +342,7 @@ docker run -d \
   --name antigravity2api \
   -p 8046:8046 \
   -e API_KEY=sk-text \
+  -e BYPASS_THRESHOLD_API_KEYS=sk-vip-1,sk-vip-2 \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=admin123 \
   -e JWT_SECRET=your-jwt-secret-key \
@@ -383,6 +387,7 @@ ghcr.io/liuw1535/antigravity2api-nodejs
 | 环境变量 | 说明 | 示例值 |
 |--------|------|--------|
 | `API_KEY` | API 认证密钥 | `sk-your-api-key` |
+| `BYPASS_THRESHOLD_API_KEYS` | 阈值豁免密钥（逗号/换行分隔） | `sk-vip-1,sk-vip-2` |
 | `ADMIN_USERNAME` | 管理员用户名 | `admin` |
 | `ADMIN_PASSWORD` | 管理员密码 | `your-secure-password` |
 | `JWT_SECRET` | JWT 密钥 | `your-jwt-secret-key` |
@@ -391,6 +396,12 @@ ghcr.io/liuw1535/antigravity2api-nodejs
 可选环境变量：
 - `PROXY`：代理地址
 - `SYSTEM_INSTRUCTION`：系统提示词
+
+`BYPASS_THRESHOLD_API_KEYS` 行为说明：
+- 该列表中的密钥可通过认证，并仅绕过阈值停轮询
+- 不绕过冷却限制、额度为 0 过滤、账号硬禁用
+- 如果某个密钥同时等于 `API_KEY`，按主密钥语义处理（不绕过阈值）
+- 凭证级开关可进一步限制绕过：只有当凭证 `allowBypassWithSpecialKey=true` 时才允许特殊Key绕过该凭证阈值
 
 3. **配置持久化存储**
 
@@ -609,6 +620,7 @@ curl http://localhost:8046/v1/chat/completions \
 | 环境变量 | 说明 | 必填 |
 |--------|------|------|
 | `API_KEY` | API 认证密钥 | ✅ |
+| `BYPASS_THRESHOLD_API_KEYS` | 阈值豁免密钥列表（逗号/换行分隔） | ❌ |
 | `ADMIN_USERNAME` | 管理员用户名 | ✅ |
 | `ADMIN_PASSWORD` | 管理员密码 | ✅ |
 | `JWT_SECRET` | JWT 密钥 | ✅ |

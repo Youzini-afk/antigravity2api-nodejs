@@ -40,6 +40,11 @@ const DEFAULT_THRESHOLD_POLICY = Object.freeze({
   allBelowThresholdAction: 'strict'
 });
 
+const DEFAULT_TOKEN_THRESHOLD_CONTROL = Object.freeze({
+  useThreshold: true,
+  allowBypassWithSpecialKey: true
+});
+
 function clampPercent(value, fallback) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
@@ -56,6 +61,20 @@ function cloneThresholdPolicy(policy) {
     applyStrategies: { ...policy.applyStrategies },
     allBelowThresholdAction: policy.allBelowThresholdAction
   };
+}
+
+function normalizeTokenThresholdControl(input) {
+  const result = { ...DEFAULT_TOKEN_THRESHOLD_CONTROL };
+  if (!input || typeof input !== 'object') return result;
+
+  if (typeof input.useThreshold === 'boolean') {
+    result.useThreshold = input.useThreshold;
+  }
+  if (typeof input.allowBypassWithSpecialKey === 'boolean') {
+    result.allowBypassWithSpecialKey = input.allowBypassWithSpecialKey;
+  }
+
+  return result;
 }
 
 /**
@@ -98,7 +117,8 @@ class GeminiCliTokenManager {
 
       // Gemini CLI 不需要 sessionId
       this.tokens = tokenArray.filter(token => token.enable !== false).map(token => ({
-        ...token
+        ...token,
+        ...normalizeTokenThresholdControl(token)
       }));
 
       this.currentIndex = 0;
@@ -763,15 +783,19 @@ class GeminiCliTokenManager {
   /**
    * 获取可用的 token
    * @param {string|null} modelId - 请求模型ID（用于阈值判断）
+   * @param {Object} [options]
+   * @param {boolean} [options.bypassThreshold=false] - 是否跳过阈值过滤
    * @returns {Promise<Object|null>} token 对象
    */
-  async getToken(modelId = null) {
+  async getToken(modelId = null, options = {}) {
     await this._ensureInitialized();
     if (this.tokens.length === 0) return null;
 
     const totalTokens = this.tokens.length;
     const startIndex = this.currentIndex;
-    const applyThreshold = modelId && this._shouldApplyThresholdForStrategy(this.rotationStrategy);
+    const applyThreshold = modelId &&
+      options.bypassThreshold !== true &&
+      this._shouldApplyThresholdForStrategy(this.rotationStrategy);
     const fallbackCandidates = [];
     let thresholdCheckedCount = 0;
     let thresholdFilteredCount = 0;
@@ -859,7 +883,13 @@ class GeminiCliTokenManager {
         refresh_token: tokenData.refresh_token,
         expires_in: tokenData.expires_in || 3599,
         timestamp: tokenData.timestamp || Date.now(),
-        enable: tokenData.enable !== undefined ? tokenData.enable : true
+        enable: tokenData.enable !== undefined ? tokenData.enable : true,
+        useThreshold: tokenData.useThreshold !== undefined
+          ? tokenData.useThreshold
+          : DEFAULT_TOKEN_THRESHOLD_CONTROL.useThreshold,
+        allowBypassWithSpecialKey: tokenData.allowBypassWithSpecialKey !== undefined
+          ? tokenData.allowBypassWithSpecialKey
+          : DEFAULT_TOKEN_THRESHOLD_CONTROL.allowBypassWithSpecialKey
       };
 
       if (tokenData.email) {
@@ -926,6 +956,7 @@ class GeminiCliTokenManager {
       const salt = await this.store.getSalt();
 
       return allTokens.map(token => ({
+        ...normalizeTokenThresholdControl(token),
         id: generateTokenId(token.refresh_token, salt),
         expires_in: token.expires_in,
         timestamp: token.timestamp,

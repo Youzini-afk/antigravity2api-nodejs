@@ -919,6 +919,8 @@ function renderTokens(tokens) {
         const safeEmail = escapeHtml(token.email || '');
         const safeProjectIdJs = escapeJs(token.projectId || '');
         const safeEmailJs = escapeJs(token.email || '');
+        const thresholdStatus = token.useThreshold !== false ? '开' : '关';
+        const bypassStatus = token.allowBypassWithSpecialKey !== false ? '允' : '禁';
 
         return `
         <div class="token-card ${!token.enable ? 'disabled' : ''} ${isRefreshing ? 'refreshing' : ''} ${skipAnimation ? 'no-animation' : ''}" id="card-${escapeHtml(cardId)}">
@@ -945,6 +947,10 @@ function renderTokens(tokens) {
                     <span class="info-label">📧</span>
                     <span class="info-value sensitive-info">${safeEmail || '点击设置'}</span>
                     <span class="info-edit-icon">✏️</span>
+                </div>
+                <div class="info-row" title="凭证级阈值控制">
+                    <span class="info-label">🎚️</span>
+                    <span class="info-value">阈值:${thresholdStatus} | 绕过:${bypassStatus}</span>
                 </div>
             </div>
             <div class="token-id-row" title="Token ID: ${escapeHtml(tokenId)}">
@@ -1149,6 +1155,8 @@ function showTokenDetail(tokenId) {
     const safeTokenId = escapeJs(tokenId);
     const safeProjectId = escapeHtml(token.projectId || '');
     const safeEmail = escapeHtml(token.email || '');
+    const useThreshold = token.useThreshold !== false;
+    const allowBypassWithSpecialKey = token.allowBypassWithSpecialKey !== false;
     const updatedAtStr = escapeHtml(token.timestamp ? new Date(token.timestamp).toLocaleString('zh-CN') : '未知');
 
     const modal = document.createElement('div');
@@ -1168,6 +1176,22 @@ function showTokenDetail(tokenId) {
                 <label>📧 邮箱</label>
                 <input type="email" id="editEmail" value="${safeEmail}" placeholder="账号邮箱">
             </div>
+            <div class="form-row-inline switch-row">
+                <div class="form-group compact switch-group">
+                    <label>启用阈值过滤</label>
+                    <label class="switch">
+                        <input type="checkbox" id="editUseThreshold" ${useThreshold ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group compact switch-group">
+                    <label>特殊Key可绕过</label>
+                    <label class="switch">
+                        <input type="checkbox" id="editAllowBypassWithSpecialKey" ${allowBypassWithSpecialKey ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
             <div class="form-group compact">
                 <label>🕒 最后更新时间</label>
                 <input type="text" value="${updatedAtStr}" readonly style="background: var(--bg); cursor: not-allowed;">
@@ -1185,6 +1209,8 @@ function showTokenDetail(tokenId) {
 async function saveTokenDetail(tokenId) {
     const projectId = document.getElementById('editProjectId').value.trim();
     const email = document.getElementById('editEmail').value.trim();
+    const useThreshold = document.getElementById('editUseThreshold').checked;
+    const allowBypassWithSpecialKey = document.getElementById('editAllowBypassWithSpecialKey').checked;
 
     showLoading('保存中...');
     try {
@@ -1193,7 +1219,7 @@ async function saveTokenDetail(tokenId) {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ projectId, email })
+            body: JSON.stringify({ projectId, email, useThreshold, allowBypassWithSpecialKey })
         });
 
         const data = await response.json();

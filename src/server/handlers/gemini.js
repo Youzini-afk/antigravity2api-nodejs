@@ -109,7 +109,8 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
       return res.status(validation.status).json(buildGeminiErrorPayload({ message: validation.message }, validation.status));
     }
 
-    const token = await tokenManager.getToken(modelName);
+    const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
+    const token = await tokenManager.getToken(modelName, { bypassThreshold });
     if (!token) {
       throw new Error('没有可用的token，请运行 npm run login 获取token');
     }

@@ -300,6 +300,9 @@
                                 style="background: var(--primary);" title="添加/导入Token">📥 导入</button>
                         </div>
                     </div>
+                    <div class="security-info" style="margin-bottom: 0.75rem;">
+                        <p>每个凭证支持独立阈值策略：可在「编辑」中设置“启用阈值过滤”和“特殊Key可绕过”。</p>
+                    </div>
 
                     <!-- Token网格 -->
                     <div id="tokenList" class="token-grid">
@@ -448,6 +451,12 @@
                                                 <label>API密钥</label>
                                                 <input type="password" name="API_KEY" placeholder="留空则不验证">
                                             </div>
+                                        </div>
+                                        <div class="form-group compact">
+                                            <label>阈值豁免密钥 <span class="help-tip"
+                                                    data-tooltip="逗号或换行分隔。使用这些密钥请求时仅绕过阈值过滤，不绕过冷却/额度耗尽/账号禁用">?</span></label>
+                                            <textarea name="BYPASS_THRESHOLD_API_KEYS" rows="3"
+                                                placeholder="sk-vip-1,sk-vip-2 或每行一个"></textarea>
                                         </div>
                                         <div class="form-row-inline switch-row">
                                             <div class="form-group compact switch-group">

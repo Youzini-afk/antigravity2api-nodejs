@@ -43,7 +43,8 @@ export const handleOpenAIRequest = async (req, res) => {
       return res.status(400).json({ error: 'model is required' });
     }
 
-    const token = await tokenManager.getToken(model);
+    const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
+    const token = await tokenManager.getToken(model, { bypassThreshold });
     if (!token) {
       throw new Error('没有可用的token，请运行 npm run login 获取token');
     }

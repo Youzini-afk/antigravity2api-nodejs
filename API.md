@@ -4,11 +4,21 @@
 
 ## 基础配置
 
-所有 API 请求需要在 Header 中携带 API Key：
+所有推理接口请求需要携带有效 API Key（`API_KEY` 或 `BYPASS_THRESHOLD_API_KEYS` 中的密钥）：
 
 ```
 Authorization: Bearer YOUR_API_KEY
 ```
+
+也支持以下等价写法：
+- `/v1/*`、`/cli/v1/*`：`x-api-key: YOUR_API_KEY`
+- `/v1beta/*`：`?key=YOUR_API_KEY` 或 `x-goog-api-key: YOUR_API_KEY`
+
+密钥语义：
+- 主密钥（`API_KEY`）：走完整阈值策略
+- 特殊密钥（`BYPASS_THRESHOLD_API_KEYS`）：仅绕过阈值过滤，不绕过冷却/额度为 0/账号禁用
+- 若同一密钥同时出现在两者中，按主密钥处理（不绕过阈值）
+- 若启用凭证级控制，特殊密钥还需该凭证 `allowBypassWithSpecialKey=true` 才能绕过该凭证阈值
 
 默认服务地址：`http://localhost:8046`
 
@@ -392,6 +402,15 @@ curl http://localhost:8046/admin/tokens \
 # 删除 Token
 curl -X DELETE http://localhost:8046/admin/tokens/REFRESH_TOKEN \
   -H "Authorization: Bearer JWT_TOKEN"
+
+# 更新凭证级阈值策略
+curl -X PUT http://localhost:8046/admin/tokens/TOKEN_ID \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer JWT_TOKEN" \
+  -d '{
+    "useThreshold": true,
+    "allowBypassWithSpecialKey": false
+  }'
 ```
 
 ### 查看模型额度
@@ -575,7 +594,7 @@ for await (const chunk of stream) {
 
 ## 注意事项
 
-1. 所有 `/v1/*` 请求必须携带有效的 API Key
+1. 所有 `/v1/*`、`/v1beta/*`、`/cli/v1/*` 请求必须携带有效 API Key（主密钥或特殊密钥）
 2. 管理 API (`/admin/*`) 需要 JWT 认证
 3. 图片输入需要使用 Base64 编码
 4. 流式响应使用 Server-Sent Events (SSE) 格式，包含心跳机制防止超时
