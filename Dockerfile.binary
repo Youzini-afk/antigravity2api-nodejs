@@ -68,7 +68,7 @@ sync_env() {
       echo "${key}=${value}" >> "$ENV_FILE"
     fi
     if [ -n "$value" ]; then
-      echo "✓ 已同步环境变量: ${key}=${value}"
+      echo "✓ 已同步环境变量: ${key}=(已设置)"
     else
       echo "✓ 已同步环境变量: ${key}=(空值)"
     fi

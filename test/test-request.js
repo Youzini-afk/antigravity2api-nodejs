@@ -5,6 +5,10 @@ import config from '../src/config/config.js';
 async function testRequest() {
   try {
     const token = await tokenManager.getToken();
+    if (!token) {
+      console.warn('SKIP: 无可用 token，跳过上游请求联调测试');
+      process.exit(0);
+    }
     
     const tools = [{
       type: 'function',
@@ -45,6 +49,7 @@ async function testRequest() {
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error('Error:', error.message);
+    process.exit(1);
   }
 }
 

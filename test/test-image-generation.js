@@ -1,8 +1,18 @@
 import fs from 'fs';
 import path from 'path';
 
-const API_URL = 'http://localhost:8046/v1/chat/completions';
-const API_KEY = 'sk-text';
+const API_URL = process.env.TEST_API_URL || 'http://localhost:8046/v1/chat/completions';
+const API_KEY = process.env.TEST_API_KEY || 'sk-text';
+const HEALTH_URL = process.env.TEST_HEALTH_URL || 'http://localhost:8046/health';
+
+async function isServerReachable() {
+  try {
+    const response = await fetch(HEALTH_URL, { method: 'GET' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
 
 async function testImageGeneration(stream = true) {
   console.log(`测试生图模型 (${stream ? '流式' : '非流式'})...\n`);
@@ -19,6 +29,11 @@ async function testImageGeneration(stream = true) {
       stream
     })
   });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`请求失败: HTTP ${response.status} ${text}`);
+  }
 
   let fullContent = '';
   
@@ -75,7 +90,16 @@ async function testImageGeneration(stream = true) {
 }
 
 (async () => {
+  const reachable = await isServerReachable();
+  if (!reachable) {
+    console.warn(`SKIP: 测试服务不可达 (${HEALTH_URL})，跳过生图联调测试`);
+    process.exit(0);
+  }
+
   // await testImageGeneration(true);
   // console.log('\n' + '='.repeat(50) + '\n');
   await testImageGeneration(false);
-})().catch(console.error);
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

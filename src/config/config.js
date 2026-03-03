@@ -23,12 +23,22 @@ let generatedCredentials = null;
 // 生成的 API_KEY 缓存
 let generatedApiKey = null;
 
+function getFirstNonEmptyEnv(keys) {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
 /**
  * 生成或获取 API_KEY
  * 如果用户未配置，自动生成随机密钥
  */
 function getApiKey() {
-  const apiKey = process.env.API_KEY;
+  const apiKey = getFirstNonEmptyEnv(['API_KEY', 'APIKEY']);
 
   if (apiKey) {
     return apiKey;
@@ -78,9 +88,9 @@ let credentialsDisplayed = false;
  * 如果用户未配置，自动生成随机凭据
  */
 function getAdminCredentials() {
-  const username = process.env.ADMIN_USERNAME;
-  const password = process.env.ADMIN_PASSWORD;
-  const jwtSecret = process.env.JWT_SECRET;
+  const username = getFirstNonEmptyEnv(['ADMIN_USERNAME', 'ADMIN_USERNAM']);
+  const password = getFirstNonEmptyEnv(['ADMIN_PASSWORD']);
+  const jwtSecret = getFirstNonEmptyEnv(['JWT_SECRET']);
 
   // 如果全部配置了，直接返回
   if (username && password && jwtSecret) {
@@ -106,10 +116,10 @@ function displayGeneratedCredentials() {
   if (credentialsDisplayed) return;
   credentialsDisplayed = true;
 
-  const username = process.env.ADMIN_USERNAME;
-  const password = process.env.ADMIN_PASSWORD;
-  const apiKey = process.env.API_KEY;
-  const jwtSecret = process.env.JWT_SECRET;
+  const username = getFirstNonEmptyEnv(['ADMIN_USERNAME', 'ADMIN_USERNAM']);
+  const password = getFirstNonEmptyEnv(['ADMIN_PASSWORD']);
+  const apiKey = getFirstNonEmptyEnv(['API_KEY', 'APIKEY']);
+  const jwtSecret = getFirstNonEmptyEnv(['JWT_SECRET']);
 
   const needsUsername = !username;
   const needsPassword = !password;

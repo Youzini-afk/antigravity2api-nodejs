@@ -67,9 +67,6 @@ app.use(express.static(publicDir));
 // 管理路由
 app.use('/admin', adminRouter);
 
-// 使用统一错误处理中间件
-app.use(errorHandler);
-
 // ==================== 请求日志中间件 ====================
 app.use((req, res, next) => {
   const ignorePaths = [
@@ -111,7 +108,7 @@ app.use((req, res, next) => {
 
   const pickFirstString = (value) => {
     const first = Array.isArray(value) ? value[0] : value;
-    return typeof first === 'string' ? first : '';
+    return typeof first === 'string' ? first.trim() : '';
   };
 
   let providedKey = '';
@@ -122,8 +119,10 @@ app.use((req, res, next) => {
   } else {
     const authHeader = pickFirstString(req.headers.authorization);
     const xApiKey = pickFirstString(req.headers['x-api-key']);
-    const bearerKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
-    providedKey = bearerKey || xApiKey;
+    const hasBearerPrefix = authHeader.toLowerCase().startsWith('bearer ');
+    const bearerKey = hasBearerPrefix ? authHeader.slice(7).trim() : '';
+    // 优先使用 Bearer 和 x-api-key，最后才回退到原始 Authorization 值
+    providedKey = bearerKey || xApiKey || authHeader;
   }
 
   let keyType = null;
@@ -135,7 +134,7 @@ app.use((req, res, next) => {
 
   if (authRequired && !keyType) {
     ipBlockManager.recordViolation(req.ip, 'auth_fail');
-    logger.warn(`API Key 验证失败: ${req.method} ${req.path} (提供的Key: ${providedKey ? providedKey.substring(0, 10) + '...' : '无'})`);
+    logger.warn(`API Key 验证失败: ${req.method} ${req.path}`);
     return res.status(401).json({ error: 'Invalid API Key' });
   }
 
@@ -221,6 +220,9 @@ app.use((req, res, next) => {
   ipBlockManager.recordViolation(req.ip, '404');
   res.status(404).json({ error: 'Not Found' });
 });
+
+// 统一错误处理中间件必须放在路由和 404 处理之后
+app.use(errorHandler);
 
 // ==================== 服务器启动 ====================
 const server = app.listen(config.server.port, config.server.host, () => {

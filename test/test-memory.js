@@ -3,9 +3,13 @@
  * 用于验证服务的内存使用是否控制在目标范围内（约20MB）
  */
 
-const http = require('http');
-const { spawn } = require('child_process');
-const path = require('path');
+import http from 'http';
+import { spawn } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // 配置
 const PORT = process.env.PORT || 9876;

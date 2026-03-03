@@ -1,4 +1,4 @@
-import { generateRequestBody } from './utils.js';
+import { generateRequestBody } from '../src/utils/utils.js';
 
 // 测试场景：user -> assistant -> assistant(工具调用,无content) -> tool1结果 -> tool2结果
 const testMessages = [
@@ -73,20 +73,42 @@ const testTools = [
   }
 ];
 
+const mockToken = {
+  sessionId: 'test-session-id',
+  projectId: 'test-project-id'
+};
+
 console.log("=== 测试消息转换 ===\n");
 console.log("输入 OpenAI 格式消息:");
 console.log(JSON.stringify(testMessages, null, 2));
 
-const result = generateRequestBody(testMessages, "claude-sonnet-4-5", {}, testTools);
+const result = generateRequestBody(testMessages, "claude-sonnet-4-5", {}, testTools, mockToken);
+if (!result?.request?.contents || !Array.isArray(result.request.contents)) {
+  console.error('FAIL: generateRequestBody 返回结构异常');
+  process.exit(1);
+}
 
 console.log("\n=== 转换后的 Antigravity 格式 ===\n");
 console.log(JSON.stringify(result.request.contents, null, 2));
 
 console.log("\n=== 验证结果 ===");
 const contents = result.request.contents;
-console.log(`✓ 消息数量: ${contents.length}`);
-console.log(`✓ 第1条 (user): ${contents[0]?.role === 'user' ? '✓' : '✗'}`);
-console.log(`✓ 第2条 (model): ${contents[1]?.role === 'model' ? '✓' : '✗'}`);
-console.log(`✓ 第3条 (model+tools): ${contents[2]?.role === 'model' && contents[2]?.parts?.length === 2 ? '✓' : '✗'}`);
-console.log(`✓ 第4条 (tool1 response): ${contents[3]?.role === 'user' && contents[3]?.parts[0]?.functionResponse ? '✓' : '✗'}`);
-console.log(`✓ 第5条 (tool2 response): ${contents[4]?.role === 'user' && contents[4]?.parts[0]?.functionResponse ? '✓' : '✗'}`);
+const hasValidLength = contents.length >= 3;
+const firstIsUser = contents[0]?.role === 'user';
+const secondIsModel = contents[1]?.role === 'model';
+const secondHasToolCalls = Array.isArray(contents[1]?.parts) &&
+  contents[1].parts.some((part) => part?.functionCall);
+const thirdHasFunctionResponses = contents[2]?.role === 'user' &&
+  Array.isArray(contents[2]?.parts) &&
+  contents[2].parts.some((part) => part?.functionResponse);
+
+console.log(`✓ 消息数量(>=3): ${hasValidLength ? '✓' : '✗'} (当前 ${contents.length})`);
+console.log(`✓ 第1条 (user): ${firstIsUser ? '✓' : '✗'}`);
+console.log(`✓ 第2条 (model): ${secondIsModel ? '✓' : '✗'}`);
+console.log(`✓ 第2条包含 tool calls: ${secondHasToolCalls ? '✓' : '✗'}`);
+console.log(`✓ 第3条包含 function responses: ${thirdHasFunctionResponses ? '✓' : '✗'}`);
+
+if (!(hasValidLength && firstIsUser && secondIsModel && secondHasToolCalls && thirdHasFunctionResponses)) {
+  console.error('FAIL: 消息转换结果不符合预期');
+  process.exit(1);
+}

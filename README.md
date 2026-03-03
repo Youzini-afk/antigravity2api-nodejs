@@ -300,23 +300,16 @@ docker compose down
 
 #### 同目录并行运行（可选）
 
-如果你在同一目录需要并行拉起第二套实例（你当前是不同目录，一般不需要），可覆盖项目名、端口和挂载路径：
+如果你在同一目录需要并行拉起第二套实例（你当前是不同目录，一般不需要），建议复制一份项目到新目录再运行。  
+当前 `docker-compose.yml` 默认固定读取项目目录下的 `.env`、`config.json`、`data/`、`public/images/`，只需改项目名和端口即可：
 
 ```bash
 COMPOSE_PROJECT_NAME=antigravity2api-alt \
 COMPOSE_HOST_PORT=8047 \
-COMPOSE_ENV_FILE_PATH=./.env.alt \
-COMPOSE_CONFIG_FILE_PATH=./config.alt.json \
-COMPOSE_DATA_DIR=./data-alt \
-COMPOSE_IMAGES_DIR=./public/images-alt \
 npm run docker:build
 
 COMPOSE_PROJECT_NAME=antigravity2api-alt \
 COMPOSE_HOST_PORT=8047 \
-COMPOSE_ENV_FILE_PATH=./.env.alt \
-COMPOSE_CONFIG_FILE_PATH=./config.alt.json \
-COMPOSE_DATA_DIR=./data-alt \
-COMPOSE_IMAGES_DIR=./public/images-alt \
 docker compose up -d
 ```
 
@@ -459,7 +452,7 @@ ghcr.io/liuw1535/antigravity2api-nodejs
 
 1. **登录系统**
    - 使用容器实际加载的环境文件中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录
-   - Docker Compose 默认读取 `COMPOSE_ENV_FILE_PATH`（默认 `./.env`）
+   - Docker Compose 默认读取项目目录下的 `.env`
    - 登录成功后会自动保存 JWT Token 到浏览器
 
 2. **添加 Token**

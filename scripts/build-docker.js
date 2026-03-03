@@ -9,10 +9,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const rootDir = path.resolve(__dirname, '..');
-const envFilePath = process.env.COMPOSE_ENV_FILE_PATH || process.env.ENV_FILE_PATH || './.env';
-const configFilePath = process.env.COMPOSE_CONFIG_FILE_PATH || process.env.CONFIG_FILE_PATH || './config.json';
-const dataDirPath = process.env.COMPOSE_DATA_DIR || process.env.DATA_DIR || './data';
-const imagesDirPath = process.env.COMPOSE_IMAGES_DIR || process.env.IMAGES_DIR || './public/images';
+const envFilePath = './.env';
+const configFilePath = './config.json';
+const dataDirPath = './data';
+const imagesDirPath = './public/images';
 const hostPort = process.env.COMPOSE_HOST_PORT || process.env.HOST_PORT || '8046';
 
 const resolveLocalPath = (targetPath) => (
@@ -34,53 +34,28 @@ console.log(`环境文件: ${envFilePath}\n`);
 console.log(`环境文件绝对路径: ${envFile}`);
 console.log(`配置文件绝对路径: ${configFile}\n`);
 
-function normalizeEnvKeys(filePath, defaults) {
-  if (!fs.existsSync(filePath)) return;
+if (process.env.COMPOSE_ENV_FILE_PATH || process.env.ENV_FILE_PATH ||
+    process.env.COMPOSE_CONFIG_FILE_PATH || process.env.CONFIG_FILE_PATH ||
+    process.env.COMPOSE_DATA_DIR || process.env.DATA_DIR ||
+    process.env.COMPOSE_IMAGES_DIR || process.env.IMAGES_DIR) {
+  console.log('⚠ 检测到自定义路径环境变量，但当前版本 docker-compose 固定使用项目目录下 .env/config.json/data/public/images');
+}
+
+function readEnvFileValues(filePath) {
+  if (!fs.existsSync(filePath)) return {};
   const content = fs.readFileSync(filePath, 'utf8');
-  const newline = content.includes('\r\n') ? '\r\n' : '\n';
   const lines = content.split(/\r?\n/);
-  let changed = false;
-
-  for (const [key, value] of Object.entries(defaults)) {
-    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const activePattern = new RegExp(`^\\s*${escapedKey}\\s*=`);
-    const commentedPattern = new RegExp(`^\\s*#\\s*${escapedKey}\\s*=`);
-
-    const activeIndexes = [];
-    let commentedIndex = -1;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (activePattern.test(line)) {
-        activeIndexes.push(i);
-      } else if (commentedIndex === -1 && commentedPattern.test(line)) {
-        commentedIndex = i;
-      }
-    }
-
-    if (activeIndexes.length === 0) {
-      if (commentedIndex !== -1) {
-        lines[commentedIndex] = `${key}=${value}`;
-      } else {
-        lines.push(`${key}=${value}`);
-      }
-      changed = true;
-      console.log(`✓ 已补充默认环境变量: ${key}`);
-      continue;
-    }
-
-    // 去重：保留最后一个有效定义（dotenv 语义），移除前面的重复项
-    if (activeIndexes.length > 1) {
-      for (let i = activeIndexes.length - 2; i >= 0; i--) {
-        lines.splice(activeIndexes[i], 1);
-      }
-      changed = true;
-      console.log(`✓ 已清理重复环境变量: ${key}`);
-    }
+  const values = {};
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const idx = line.indexOf('=');
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    values[key] = value;
   }
-
-  if (changed) {
-    fs.writeFileSync(filePath, lines.join(newline), 'utf8');
-  }
+  return values;
 }
 
 // 确保配置文件目录存在
@@ -105,13 +80,17 @@ if (!fs.existsSync(envFile)) {
   console.log('✓ .env 已存在');
 }
 
-// 确保基础登录和鉴权字段存在，并修复重复键导致的覆盖问题
-normalizeEnvKeys(envFile, {
-  API_KEY: 'sk-text',
-  ADMIN_USERNAME: 'admin',
-  ADMIN_PASSWORD: 'admin123',
-  JWT_SECRET: 'your-jwt-secret-key-change-this-in-production'
-});
+const envValues = readEnvFileValues(envFile);
+const missingRequiredKeys = ['API_KEY', 'ADMIN_PASSWORD']
+  .filter((key) => !envValues[key]);
+const hasAdminUsername = Boolean(envValues.ADMIN_USERNAME || envValues.ADMIN_USERNAM);
+if (!hasAdminUsername) missingRequiredKeys.push('ADMIN_USERNAME');
+
+if (missingRequiredKeys.length > 0) {
+  console.error(`❌ .env 缺少关键配置: ${missingRequiredKeys.join(', ')}`);
+  console.error('  请先编辑项目目录下 .env，再重新执行 npm run docker:build');
+  process.exit(1);
+}
 
 // 检查并复制 config.json
 if (!fs.existsSync(configFile)) {
