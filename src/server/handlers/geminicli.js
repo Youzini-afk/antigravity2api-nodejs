@@ -42,13 +42,21 @@ import { disableTimeouts } from './common/timeouts.js';
  */
 export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
   const requestBody = req.body;
+  const initialScope = forceFormat === 'gemini' || forceFormat === 'claude' ? forceFormat : 'openai';
 
   const normalized = normalizeGeminiCliRequest(requestBody, forceFormat);
   if (!normalized.ok) {
-    return res.status(normalized.status).json({ error: normalized.message });
+    return res.status(normalized.status).json(
+      buildOpenAIErrorPayload(
+        { message: normalized.message, type: 'invalid_request_error' },
+        normalized.status,
+        { scope: initialScope }
+      )
+    );
   }
 
   const { format, stream, cleanedBody } = normalized;
+  const errorOptions = { scope: format === 'gemini' || format === 'claude' ? format : 'openai' };
 
   try {
     const { geminiRequest, model: actualModel, features, sourceFormat } = convertToGeminiCli(cleanedBody);
@@ -98,7 +106,7 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
         clearInterval(heartbeatTimer);
         if (!res.writableEnded) {
           const statusCode = error.statusCode || error.status || 500;
-          writeStreamData(res, buildOpenAIErrorPayload(error, statusCode));
+          writeStreamData(res, buildOpenAIErrorPayload(error, statusCode, errorOptions));
           endStream(res, false);
         }
         logger.error('[GeminiCLI] 生成响应失败:', error.message);
@@ -145,7 +153,7 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
         clearInterval(heartbeatTimer);
         if (!res.writableEnded) {
           const statusCode = error.statusCode || error.status || 500;
-          writeStreamData(res, buildOpenAIErrorPayload(error, statusCode));
+          writeStreamData(res, buildOpenAIErrorPayload(error, statusCode, errorOptions));
           endStream(res, false);
         }
         logger.error('[GeminiCLI] 假流式生成响应失败:', error.message);
@@ -233,6 +241,6 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
     logger.error('[GeminiCLI] 生成响应失败:', error.message);
     if (res.headersSent) return;
     const statusCode = error.statusCode || error.status || 500;
-    return res.status(statusCode).json(buildOpenAIErrorPayload(error, statusCode));
+    return res.status(statusCode).json(buildOpenAIErrorPayload(error, statusCode, errorOptions));
   }
 };

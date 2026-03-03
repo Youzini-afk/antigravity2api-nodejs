@@ -33,14 +33,19 @@ import {
 export const handleOpenAIRequest = async (req, res) => {
   const body = req.body || {};
   const { messages, model, stream = false, tools, ...params } = body;
+  const errorOptions = { scope: 'openai' };
 
   try {
     const validation = validateIncomingChatRequest('openai', body);
     if (!validation.ok) {
-      return res.status(validation.status).json({ error: validation.message });
+      return res.status(validation.status).json(
+        buildOpenAIErrorPayload({ message: validation.message, type: 'invalid_request_error' }, validation.status, errorOptions)
+      );
     }
     if (typeof model !== 'string' || !model) {
-      return res.status(400).json({ error: 'model is required' });
+      return res.status(400).json(
+        buildOpenAIErrorPayload({ message: 'model is required', type: 'invalid_request_error' }, 400, errorOptions)
+      );
     }
 
     const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
@@ -142,7 +147,7 @@ export const handleOpenAIRequest = async (req, res) => {
         clearInterval(heartbeatTimer);
         if (!res.writableEnded) {
           const statusCode = error.statusCode || error.status || 500;
-          writeStreamData(res, buildOpenAIErrorPayload(error, statusCode));
+          writeStreamData(res, buildOpenAIErrorPayload(error, statusCode, errorOptions));
           endStream(res);
         }
         logger.error('生成响应失败:', error.message);
@@ -209,7 +214,7 @@ export const handleOpenAIRequest = async (req, res) => {
         logger.error('假非流生成响应失败:', error.message);
         if (res.headersSent) return;
         const statusCode = error.statusCode || error.status || 500;
-        return res.status(statusCode).json(buildOpenAIErrorPayload(error, statusCode));
+        return res.status(statusCode).json(buildOpenAIErrorPayload(error, statusCode, errorOptions));
       }
     } else {
       // 非流式请求：设置较长超时，避免大模型响应超时
@@ -255,6 +260,6 @@ export const handleOpenAIRequest = async (req, res) => {
     logger.error('生成响应失败:', error.message);
     if (res.headersSent) return;
     const statusCode = error.statusCode || error.status || 500;
-    return res.status(statusCode).json(buildOpenAIErrorPayload(error, statusCode));
+    return res.status(statusCode).json(buildOpenAIErrorPayload(error, statusCode, errorOptions));
   }
 };

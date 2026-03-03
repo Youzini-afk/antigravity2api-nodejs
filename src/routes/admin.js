@@ -151,6 +151,100 @@ function parseOptionalBoolean(value) {
   return undefined;
 }
 
+const ERROR_REWRITE_ALLOWED_SCOPES = ['openai', 'gemini', 'claude'];
+const ERROR_REWRITE_ALLOWED_LOGIC = ['and', 'or'];
+const ERROR_REWRITE_ALLOWED_MODES = ['replace', 'prepend', 'append'];
+const ERROR_REWRITE_STRING_MATCH_FIELDS = ['typeExact', 'codeExact', 'messageExact', 'messageContains', 'rawExact', 'rawContains'];
+
+function validateStringArray(arr, fieldPath) {
+  if (!Array.isArray(arr)) return `${fieldPath} 必须是字符串数组`;
+  for (let i = 0; i < arr.length; i += 1) {
+    const value = arr[i];
+    if (typeof value !== 'string' || !value.trim()) {
+      return `${fieldPath}[${i}] 必须是非空字符串`;
+    }
+  }
+  return null;
+}
+
+function validateErrorRewritePolicy(policy, fieldPath = 'errorRewrite') {
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+    return `${fieldPath} 必须是对象`;
+  }
+  if (typeof policy.enabled !== 'boolean') {
+    return `${fieldPath}.enabled 必须是布尔值`;
+  }
+  if (!Array.isArray(policy.rules)) {
+    return `${fieldPath}.rules 必须是数组`;
+  }
+
+  for (let i = 0; i < policy.rules.length; i += 1) {
+    const rule = policy.rules[i];
+    const basePath = `${fieldPath}.rules[${i}]`;
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+      return `${basePath} 必须是对象`;
+    }
+    if (typeof rule.id !== 'string' || !rule.id.trim()) {
+      return `${basePath}.id 必须是非空字符串`;
+    }
+    if (typeof rule.enabled !== 'boolean') {
+      return `${basePath}.enabled 必须是布尔值`;
+    }
+    if (!ERROR_REWRITE_ALLOWED_LOGIC.includes(rule.logic)) {
+      return `${basePath}.logic 仅支持 and 或 or`;
+    }
+    if (rule.scope !== undefined) {
+      if (!Array.isArray(rule.scope)) {
+        return `${basePath}.scope 必须是字符串数组`;
+      }
+      for (let j = 0; j < rule.scope.length; j += 1) {
+        const scope = rule.scope[j];
+        if (!ERROR_REWRITE_ALLOWED_SCOPES.includes(scope)) {
+          return `${basePath}.scope[${j}] 仅支持 ${ERROR_REWRITE_ALLOWED_SCOPES.join('/')}`;
+        }
+      }
+    }
+
+    if (!rule.match || typeof rule.match !== 'object' || Array.isArray(rule.match)) {
+      return `${basePath}.match 必须是对象`;
+    }
+    const statusCodes = rule.match.statusCodes;
+    if (!Array.isArray(statusCodes)) {
+      return `${basePath}.match.statusCodes 必须是数组`;
+    }
+    for (let j = 0; j < statusCodes.length; j += 1) {
+      const code = statusCodes[j];
+      if (!Number.isInteger(code) || code < 100 || code > 599) {
+        return `${basePath}.match.statusCodes[${j}] 必须是 100~599 的整数`;
+      }
+    }
+
+    for (const key of ERROR_REWRITE_STRING_MATCH_FIELDS) {
+      const err = validateStringArray(rule.match[key], `${basePath}.match.${key}`);
+      if (err) return err;
+    }
+
+    const hasAnyMatch =
+      statusCodes.length > 0 ||
+      ERROR_REWRITE_STRING_MATCH_FIELDS.some((key) => Array.isArray(rule.match[key]) && rule.match[key].length > 0);
+    if (!hasAnyMatch) {
+      return `${basePath}.match 至少配置一个匹配条件`;
+    }
+
+    if (!rule.rewrite || typeof rule.rewrite !== 'object' || Array.isArray(rule.rewrite)) {
+      return `${basePath}.rewrite 必须是对象`;
+    }
+    if (!ERROR_REWRITE_ALLOWED_MODES.includes(rule.rewrite.mode)) {
+      return `${basePath}.rewrite.mode 仅支持 ${ERROR_REWRITE_ALLOWED_MODES.join('/')}`;
+    }
+    if (typeof rule.rewrite.message !== 'string' || !rule.rewrite.message.trim()) {
+      return `${basePath}.rewrite.message 必须是非空字符串`;
+    }
+  }
+
+  return null;
+}
+
 // Token管理API - 需要JWT认证（使用 Cookie 优先）
 router.get('/tokens', cookieAuthMiddleware, async (req, res) => {
   try {
@@ -610,6 +704,16 @@ router.put('/config', cookieAuthMiddleware, (req, res) => {
         success: false,
         message: 'rotation 配置请使用 /admin/rotation 接口更新'
       });
+    }
+
+    if (jsonUpdates?.errorRewrite !== undefined) {
+      const errorRewriteErr = validateErrorRewritePolicy(jsonUpdates.errorRewrite, 'json.errorRewrite');
+      if (errorRewriteErr) {
+        return res.status(400).json({
+          success: false,
+          message: errorRewriteErr
+        });
+      }
     }
 
     // 安全检查：如果修改了官方系统提示词，必须验证密码

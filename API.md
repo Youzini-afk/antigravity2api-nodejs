@@ -236,6 +236,45 @@ API 返回标准的 HTTP 状态码：
 }
 ```
 
+### 错误改写策略（可选）
+
+可通过 `config.json` 顶层 `errorRewrite` 配置错误改写规则。命中规则后，仅改写返回体的 `message` 字段，不修改响应结构和 HTTP 状态码。
+
+```json
+{
+  "errorRewrite": {
+    "enabled": true,
+    "rules": [
+      {
+        "id": "rule-rate-limit",
+        "enabled": true,
+        "logic": "and",
+        "scope": ["openai", "gemini", "claude"],
+        "match": {
+          "statusCodes": [429],
+          "typeExact": ["upstream_api_error"],
+          "codeExact": ["429"],
+          "messageExact": [],
+          "messageContains": ["rate limit", "quota"],
+          "rawExact": [],
+          "rawContains": ["RESOURCE_EXHAUSTED"]
+        },
+        "rewrite": {
+          "mode": "replace",
+          "message": "当前请求较多，请稍后重试。"
+        }
+      }
+    ]
+  }
+}
+```
+
+规则说明：
+- 仅作用推理接口：`/v1/*`、`/v1beta/*`、`/cli/v1/*`
+- 按顺序首条命中生效
+- 单条规则支持 `logic=and|or`
+- `mode` 支持 `replace|prepend|append`
+
 ## 思维链模型
 
 对于支持思维链的模型（如 `gemini-2.5-pro`、`claude-opus-4-5-thinking` 等），可以通过以下参数控制推理深度：
@@ -503,6 +542,7 @@ curl -X PUT http://localhost:8046/admin/config \
 ```
 
 > 注意：`rotation` 字段不支持通过 `/admin/config` 更新，请使用 `/admin/rotation`。
+> `errorRewrite` 字段支持通过 `/admin/config` 更新，并在保存后热生效。
 
 ## 使用示例
 

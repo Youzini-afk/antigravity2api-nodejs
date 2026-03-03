@@ -2,6 +2,7 @@
  * 统一错误处理模块
  * @module utils/errors
  */
+import { rewriteErrorPayloadMessage } from './errorRewrite.js';
 
 /**
  * 应用错误基类
@@ -156,49 +157,104 @@ function extractErrorMessage(error) {
  * @param {number} statusCode - HTTP 状态码
  * @returns {{error: {message: string, type: string, code: number}}}
  */
-export function buildOpenAIErrorPayload(error, statusCode) {
+export function buildOpenAIErrorPayload(error, statusCode, options = {}) {
+  let payload;
+  let message = '';
+  let type = '';
+  let code = '';
+
   // 处理上游 API 错误
   if (error.isUpstreamApiError && error.rawBody) {
     try {
       const raw = typeof error.rawBody === 'string' ? JSON.parse(error.rawBody) : error.rawBody;
       const inner = raw.error || raw;
-      return {
+      payload = {
         error: {
           message: inner.message || error.message || 'Upstream API error',
           type: inner.type || 'upstream_api_error',
           code: inner.code ?? statusCode
         }
       };
+      message = payload.error.message;
+      type = payload.error.type;
+      code = payload.error.code;
+      return rewriteErrorPayloadMessage(payload, {
+        payloadType: 'openai',
+        scope: options.scope,
+        statusCode,
+        error,
+        message,
+        type,
+        code
+      });
     } catch {
-      return {
+      payload = {
         error: {
           message: error.rawBody || error.message || 'Upstream API error',
           type: 'upstream_api_error',
           code: statusCode
         }
       };
+      message = payload.error.message;
+      type = payload.error.type;
+      code = payload.error.code;
+      return rewriteErrorPayloadMessage(payload, {
+        payloadType: 'openai',
+        scope: options.scope,
+        statusCode,
+        error,
+        message,
+        type,
+        code
+      });
     }
   }
 
   // 处理应用错误
   if (error instanceof AppError) {
-    return {
+    payload = {
       error: {
         message: error.message,
         type: error.type,
         code: error.statusCode
       }
     };
+    message = payload.error.message;
+    type = payload.error.type;
+    code = payload.error.code;
+    return rewriteErrorPayloadMessage(payload, {
+      payloadType: 'openai',
+      scope: options.scope,
+      statusCode,
+      error,
+      message,
+      type,
+      code
+    });
   }
 
   // 处理通用错误
-  return {
+  const genericType = typeof error?.type === 'string' && error.type ? error.type : 'server_error';
+  const genericCode = error?.code ?? statusCode;
+  payload = {
     error: {
       message: error.message || 'Internal server error',
-      type: 'server_error',
-      code: statusCode
+      type: genericType,
+      code: genericCode
     }
   };
+  message = payload.error.message;
+  type = payload.error.type;
+  code = payload.error.code;
+  return rewriteErrorPayloadMessage(payload, {
+    payloadType: 'openai',
+    scope: options.scope,
+    statusCode,
+    error,
+    message,
+    type,
+    code
+  });
 }
 
 /**
@@ -207,14 +263,23 @@ export function buildOpenAIErrorPayload(error, statusCode) {
  * @param {number} statusCode - HTTP 状态码
  * @returns {{error: {code: number, message: string, status: string}}}
  */
-export function buildGeminiErrorPayload(error, statusCode) {
-  return {
+export function buildGeminiErrorPayload(error, statusCode, options = {}) {
+  const payload = {
     error: {
       code: statusCode,
       message: extractErrorMessage(error),
       status: "INTERNAL"
     }
   };
+  return rewriteErrorPayloadMessage(payload, {
+    payloadType: 'gemini',
+    scope: options.scope,
+    statusCode,
+    error,
+    message: payload.error.message,
+    type: payload.error.status,
+    code: payload.error.code
+  });
 }
 
 /**
@@ -223,19 +288,28 @@ export function buildGeminiErrorPayload(error, statusCode) {
  * @param {number} statusCode - HTTP 状态码
  * @returns {{type: string, error: {type: string, message: string}}}
  */
-export function buildClaudeErrorPayload(error, statusCode) {
+export function buildClaudeErrorPayload(error, statusCode, options = {}) {
   const errorType = statusCode === 401 ? "authentication_error" :
                     statusCode === 429 ? "rate_limit_error" :
                     statusCode === 400 ? "invalid_request_error" :
                     "api_error";
   
-  return {
+  const payload = {
     type: "error",
     error: {
       type: errorType,
       message: extractErrorMessage(error)
     }
   };
+  return rewriteErrorPayloadMessage(payload, {
+    payloadType: 'claude',
+    scope: options.scope,
+    statusCode,
+    error,
+    message: payload.error.message,
+    type: payload.error.type,
+    code: statusCode
+  });
 }
 
 /**

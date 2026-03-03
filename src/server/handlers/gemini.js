@@ -101,12 +101,13 @@ export const handleGeminiModelDetail = async (req, res) => {
  */
 export const handleGeminiRequest = async (req, res, modelName, isStream) => {
   const safeRetries = getSafeRetries(config.retryTimes);
+  const errorOptions = { scope: 'gemini' };
 
   try {
     const body = req.body || {};
     const validation = validateIncomingChatRequest('gemini', body);
     if (!validation.ok) {
-      return res.status(validation.status).json(buildGeminiErrorPayload({ message: validation.message }, validation.status));
+      return res.status(validation.status).json(buildGeminiErrorPayload({ message: validation.message }, validation.status, errorOptions));
     }
 
     const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
@@ -197,7 +198,7 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
         clearInterval(heartbeatTimer);
         if (!res.writableEnded) {
           const statusCode = error.statusCode || error.status || 500;
-          writeStreamData(res, buildGeminiErrorPayload(error, statusCode));
+          writeStreamData(res, buildGeminiErrorPayload(error, statusCode, errorOptions));
           endStream(res, false);
         }
         logger.error('Gemini 流式请求失败:', error.message);
@@ -241,7 +242,7 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
         logger.error('Gemini 假非流请求失败:', error.message);
         if (res.headersSent) return;
         const statusCode = error.statusCode || error.status || 500;
-        res.status(statusCode).json(buildGeminiErrorPayload(error, statusCode));
+        res.status(statusCode).json(buildGeminiErrorPayload(error, statusCode, errorOptions));
       }
     } else {
       // 非流式
@@ -262,6 +263,6 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
     logger.error('Gemini 请求失败:', error.message);
     if (res.headersSent) return;
     const statusCode = error.statusCode || error.status || 500;
-    res.status(statusCode).json(buildGeminiErrorPayload(error, statusCode));
+    res.status(statusCode).json(buildGeminiErrorPayload(error, statusCode, errorOptions));
   }
 };

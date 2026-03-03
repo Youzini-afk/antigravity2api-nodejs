@@ -52,14 +52,15 @@ export const createClaudeStreamEvent = (eventType, data) => {
 export const handleClaudeRequest = async (req, res, isStream) => {
   const body = req.body || {};
   const { messages, model, system, tools, ...rawParams } = body;
+  const errorOptions = { scope: 'claude' };
 
   try {
     const validation = validateIncomingChatRequest('claude', body);
     if (!validation.ok) {
-      return res.status(validation.status).json(buildClaudeErrorPayload({ message: validation.message }, validation.status));
+      return res.status(validation.status).json(buildClaudeErrorPayload({ message: validation.message }, validation.status, errorOptions));
     }
     if (typeof model !== 'string' || !model) {
-      return res.status(400).json(buildClaudeErrorPayload({ message: 'model is required' }, 400));
+      return res.status(400).json(buildClaudeErrorPayload({ message: 'model is required' }, 400, errorOptions));
     }
 
     const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
@@ -309,7 +310,7 @@ export const handleClaudeRequest = async (req, res, isStream) => {
         clearInterval(heartbeatTimer);
         if (!res.writableEnded) {
           const statusCode = error.statusCode || error.status || 500;
-          res.write(createClaudeStreamEvent('error', buildClaudeErrorPayload(error, statusCode)));
+          res.write(createClaudeStreamEvent('error', buildClaudeErrorPayload(error, statusCode, errorOptions)));
           res.end();
         }
         logger.error('Claude 流式请求失败:', error.message);
@@ -364,7 +365,7 @@ export const handleClaudeRequest = async (req, res, isStream) => {
         logger.error('Claude 假非流请求失败:', error.message);
         if (res.headersSent) return;
         const statusCode = error.statusCode || error.status || 500;
-        res.status(statusCode).json(buildClaudeErrorPayload(error, statusCode));
+        res.status(statusCode).json(buildClaudeErrorPayload(error, statusCode, errorOptions));
       }
     } else {
       // 非流式请求
@@ -396,6 +397,6 @@ export const handleClaudeRequest = async (req, res, isStream) => {
     logger.error('Claude 请求失败:', error.message);
     if (res.headersSent) return;
     const statusCode = error.statusCode || error.status || 500;
-    res.status(statusCode).json(buildClaudeErrorPayload(error, statusCode));
+    res.status(statusCode).json(buildClaudeErrorPayload(error, statusCode, errorOptions));
   }
 };

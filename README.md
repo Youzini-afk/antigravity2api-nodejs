@@ -10,6 +10,7 @@
 - ✅ 工具调用（Function Calling）支持
 - ✅ 多账号自动轮换（支持多种轮询策略）
 - ✅ 凭证级阈值控制（每个账号可独立启停阈值/允许特殊Key绕过）
+- ✅ 推理错误改写策略（按规则拦截并自定义错误文案）
 - ✅ Token 自动刷新
 - ✅ API Key 认证
 - ✅ 思维链（Thinking）输出，兼容 OpenAI reasoning_effort 参数和 DeepSeek reasoning_content 格式
@@ -585,6 +586,10 @@ curl http://localhost:8046/v1/chat/completions \
     "strategy": "round_robin", // 轮询策略：round_robin/quota_exhausted/request_count
     "requestCount": 50         // request_count 策略下每个 Token 的请求次数
   },
+  "errorRewrite": {
+    "enabled": false,          // 是否启用错误改写策略
+    "rules": []                // 错误改写规则列表（按顺序首条命中）
+  },
   "defaults": {
     "temperature": 1,          // 默认温度参数
     "topP": 1,                 // 默认 top_p
@@ -612,6 +617,15 @@ curl http://localhost:8046/v1/chat/completions \
 | `round_robin` | 均衡负载：每次请求后切换到下一个 Token |
 | `quota_exhausted` | 额度耗尽才切换：持续使用当前 Token 直到额度用完（高性能优化） |
 | `request_count` | 自定义次数：每个 Token 使用指定次数后切换（默认策略） |
+
+### 错误改写策略说明
+
+- 入口：管理后台「设置 -> 🚨 错误改写」
+- 生效范围：仅推理接口（`/v1/*`、`/v1beta/*`、`/cli/v1/*`）
+- 匹配字段：`status/type/code/message/rawText`
+- 匹配方式：精确匹配与包含匹配（同字段任一命中，不同字段按 `and/or` 组合）
+- 命中顺序：规则按列表顺序匹配，首条命中即停止
+- 改写范围：仅 `message` 字段，支持 `replace` / `prepend` / `append`
 
 ### 2. .env（敏感配置）
 

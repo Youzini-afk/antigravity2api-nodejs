@@ -302,6 +302,32 @@ const DEFAULT_THRESHOLD_POLICY = {
   allBelowThresholdAction: 'strict'
 };
 
+const ERROR_REWRITE_VALID_SCOPES = ['openai', 'gemini', 'claude'];
+const ERROR_REWRITE_STRING_FIELDS = ['typeExact', 'codeExact', 'messageExact', 'messageContains', 'rawExact', 'rawContains'];
+const DEFAULT_ERROR_REWRITE_RULE = Object.freeze({
+  id: '',
+  enabled: true,
+  logic: 'and',
+  scope: ERROR_REWRITE_VALID_SCOPES,
+  match: {
+    statusCodes: [],
+    typeExact: [],
+    codeExact: [],
+    messageExact: [],
+    messageContains: [],
+    rawExact: [],
+    rawContains: []
+  },
+  rewrite: {
+    mode: 'replace',
+    message: ''
+  }
+});
+const DEFAULT_ERROR_REWRITE_POLICY = Object.freeze({
+  enabled: false,
+  rules: []
+});
+
 function normalizeThresholdPolicy(policy) {
   const base = JSON.parse(JSON.stringify(DEFAULT_THRESHOLD_POLICY));
   if (!policy || typeof policy !== 'object') return base;
@@ -358,6 +384,100 @@ function mergeThresholdPolicyWithFallback(globalPolicyInput, cliPolicyInput) {
   });
 }
 
+function normalizeStringArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  const values = [];
+  const seen = new Set();
+  for (const item of arr) {
+    if (typeof item !== 'string') continue;
+    const value = item.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    values.push(value);
+  }
+  return values;
+}
+
+function normalizeStatusCodes(arr) {
+  if (!Array.isArray(arr)) return [];
+  const values = [];
+  const seen = new Set();
+  for (const item of arr) {
+    const num = Number(item);
+    if (!Number.isInteger(num) || num < 100 || num > 599 || seen.has(num)) continue;
+    seen.add(num);
+    values.push(num);
+  }
+  return values;
+}
+
+function normalizeErrorRewriteRule(rule, index) {
+  if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return null;
+
+  const id = typeof rule.id === 'string' && rule.id.trim()
+    ? rule.id.trim()
+    : `rule-${index + 1}`;
+  const enabled = typeof rule.enabled === 'boolean' ? rule.enabled : true;
+  const logic = rule.logic === 'or' ? 'or' : 'and';
+  const scope = normalizeStringArray(rule.scope).filter(item => ERROR_REWRITE_VALID_SCOPES.includes(item));
+  const normalizedScope = scope.length > 0 ? scope : [...ERROR_REWRITE_VALID_SCOPES];
+  const rawMatch = rule.match && typeof rule.match === 'object' && !Array.isArray(rule.match) ? rule.match : {};
+
+  const match = {
+    statusCodes: normalizeStatusCodes(rawMatch.statusCodes),
+    typeExact: normalizeStringArray(rawMatch.typeExact),
+    codeExact: normalizeStringArray(rawMatch.codeExact),
+    messageExact: normalizeStringArray(rawMatch.messageExact),
+    messageContains: normalizeStringArray(rawMatch.messageContains),
+    rawExact: normalizeStringArray(rawMatch.rawExact),
+    rawContains: normalizeStringArray(rawMatch.rawContains)
+  };
+
+  const hasAnyMatch =
+    match.statusCodes.length > 0 ||
+    ERROR_REWRITE_STRING_FIELDS.some(field => match[field].length > 0);
+  if (!hasAnyMatch) return null;
+
+  const rawRewrite = rule.rewrite && typeof rule.rewrite === 'object' && !Array.isArray(rule.rewrite) ? rule.rewrite : {};
+  const mode = rawRewrite.mode === 'prepend' || rawRewrite.mode === 'append' ? rawRewrite.mode : 'replace';
+  const message = typeof rawRewrite.message === 'string' ? rawRewrite.message.trim() : '';
+  if (!message) return null;
+
+  return {
+    ...DEFAULT_ERROR_REWRITE_RULE,
+    id,
+    enabled,
+    logic,
+    scope: normalizedScope,
+    match,
+    rewrite: {
+      mode,
+      message
+    }
+  };
+}
+
+function normalizeErrorRewritePolicy(policy) {
+  const base = {
+    enabled: DEFAULT_ERROR_REWRITE_POLICY.enabled,
+    rules: []
+  };
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+    return base;
+  }
+
+  if (typeof policy.enabled === 'boolean') {
+    base.enabled = policy.enabled;
+  }
+
+  const rules = Array.isArray(policy.rules) ? policy.rules : [];
+  base.rules = rules
+    .map((rule, index) => normalizeErrorRewriteRule(rule, index))
+    .filter(Boolean);
+
+  return base;
+}
+
 /**
  * 获取当前使用的 API 配置（Antigravity）
  * @param {Object} jsonConfig - JSON 配置对象
@@ -412,6 +532,7 @@ export function buildConfig(jsonConfig) {
     jsonConfig.rotation?.thresholdPolicy,
     jsonConfig.geminicli?.rotation?.thresholdPolicy
   );
+  const errorRewritePolicy = normalizeErrorRewritePolicy(jsonConfig.errorRewrite);
 
   return {
     server: {
@@ -429,6 +550,7 @@ export function buildConfig(jsonConfig) {
       requestCount: jsonConfig.rotation?.requestCount || 10,
       thresholdPolicy: globalThresholdPolicy
     },
+    errorRewrite: errorRewritePolicy,
     // 日志配置
     log: {
       maxSizeMB: jsonConfig.log?.maxSizeMB || 10,    // 单个日志文件最大 MB
