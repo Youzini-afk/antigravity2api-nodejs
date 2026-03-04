@@ -4,6 +4,99 @@
  */
 import { rewriteErrorPayloadMessage } from './errorRewrite.js';
 
+function tryParseJsonObject(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getUpstreamErrorRoot(error) {
+  if (error?.isUpstreamApiError && error.rawBody) {
+    const parsed = tryParseJsonObject(error.rawBody);
+    if (parsed) return parsed;
+  }
+  const responseData = error?.response?.data;
+  if (responseData !== undefined && responseData !== null) {
+    const parsed = tryParseJsonObject(responseData);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function unwrapErrorPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  if (payload.error && typeof payload.error === 'object') {
+    return payload.error;
+  }
+  return payload;
+}
+
+function toNonEmptyString(value) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text ? text : '';
+}
+
+function normalizeNestedMessage(message) {
+  let current = toNonEmptyString(message);
+  if (!current) return '';
+
+  for (let i = 0; i < 4; i += 1) {
+    const parsed = tryParseJsonObject(current);
+    if (!parsed) break;
+    const nested = unwrapErrorPayload(parsed);
+    const nestedMessage = toNonEmptyString(nested?.message);
+    if (!nestedMessage || nestedMessage === current) break;
+    current = nestedMessage;
+  }
+
+  return current;
+}
+
+function getGeminiStatusByStatusCode(statusCode) {
+  switch (Number(statusCode)) {
+    case 400: return 'INVALID_ARGUMENT';
+    case 401: return 'UNAUTHENTICATED';
+    case 403: return 'PERMISSION_DENIED';
+    case 404: return 'NOT_FOUND';
+    case 409: return 'ABORTED';
+    case 429: return 'RESOURCE_EXHAUSTED';
+    case 499: return 'CANCELLED';
+    case 501: return 'NOT_IMPLEMENTED';
+    case 503: return 'UNAVAILABLE';
+    case 504: return 'DEADLINE_EXCEEDED';
+    default: return 'INTERNAL';
+  }
+}
+
+function getUpstreamStructuredFields(error) {
+  const root = getUpstreamErrorRoot(error);
+  if (!root) {
+    return {
+      message: '',
+      type: '',
+      code: undefined,
+      status: ''
+    };
+  }
+
+  const primary = unwrapErrorPayload(root) || {};
+  const nestedFromMessage = unwrapErrorPayload(tryParseJsonObject(primary.message));
+
+  const message = normalizeNestedMessage(primary.message);
+  const type = toNonEmptyString(primary.type) || toNonEmptyString(nestedFromMessage?.type);
+  const code = primary.code ?? nestedFromMessage?.code;
+  const status = toNonEmptyString(primary.status) || toNonEmptyString(nestedFromMessage?.status);
+
+  return { message, type, code, status };
+}
+
 /**
  * 应用错误基类
  */
@@ -142,13 +235,12 @@ export function createApiError(message, status, rawBody) {
  * @returns {string}
  */
 function extractErrorMessage(error) {
-  if (error.isUpstreamApiError && error.rawBody) {
-    try {
-      const raw = typeof error.rawBody === 'string' ? JSON.parse(error.rawBody) : error.rawBody;
-      return raw.error?.message || raw.message || error.message;
-    } catch {}
+  const upstreamFields = getUpstreamStructuredFields(error);
+  if (upstreamFields.message) {
+    return upstreamFields.message;
   }
-  return error.message || 'Internal server error';
+  const normalized = normalizeNestedMessage(error?.message);
+  return normalized || error?.message || 'Internal server error';
 }
 
 /**
@@ -165,49 +257,26 @@ export function buildOpenAIErrorPayload(error, statusCode, options = {}) {
 
   // 处理上游 API 错误
   if (error.isUpstreamApiError && error.rawBody) {
-    try {
-      const raw = typeof error.rawBody === 'string' ? JSON.parse(error.rawBody) : error.rawBody;
-      const inner = raw.error || raw;
-      payload = {
-        error: {
-          message: inner.message || error.message || 'Upstream API error',
-          type: inner.type || 'upstream_api_error',
-          code: inner.code ?? statusCode
-        }
-      };
-      message = payload.error.message;
-      type = payload.error.type;
-      code = payload.error.code;
-      return rewriteErrorPayloadMessage(payload, {
-        payloadType: 'openai',
-        scope: options.scope,
-        statusCode,
-        error,
-        message,
-        type,
-        code
-      });
-    } catch {
-      payload = {
-        error: {
-          message: error.rawBody || error.message || 'Upstream API error',
-          type: 'upstream_api_error',
-          code: statusCode
-        }
-      };
-      message = payload.error.message;
-      type = payload.error.type;
-      code = payload.error.code;
-      return rewriteErrorPayloadMessage(payload, {
-        payloadType: 'openai',
-        scope: options.scope,
-        statusCode,
-        error,
-        message,
-        type,
-        code
-      });
-    }
+    const upstreamFields = getUpstreamStructuredFields(error);
+    payload = {
+      error: {
+        message: upstreamFields.message || String(error.rawBody || error.message || 'Upstream API error'),
+        type: upstreamFields.type || 'upstream_api_error',
+        code: upstreamFields.code ?? statusCode
+      }
+    };
+    message = payload.error.message;
+    type = payload.error.type;
+    code = payload.error.code;
+    return rewriteErrorPayloadMessage(payload, {
+      payloadType: 'openai',
+      scope: options.scope,
+      statusCode,
+      error,
+      message,
+      type,
+      code
+    });
   }
 
   // 处理应用错误
@@ -264,11 +333,12 @@ export function buildOpenAIErrorPayload(error, statusCode, options = {}) {
  * @returns {{error: {code: number, message: string, status: string}}}
  */
 export function buildGeminiErrorPayload(error, statusCode, options = {}) {
+  const upstreamFields = getUpstreamStructuredFields(error);
   const payload = {
     error: {
       code: statusCode,
-      message: extractErrorMessage(error),
-      status: "INTERNAL"
+      message: upstreamFields.message || extractErrorMessage(error),
+      status: upstreamFields.status || getGeminiStatusByStatusCode(statusCode)
     }
   };
   return rewriteErrorPayloadMessage(payload, {

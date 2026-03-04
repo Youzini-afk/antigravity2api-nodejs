@@ -110,6 +110,7 @@ class TokenManager {
     try {
       log.info('正在初始化token管理器...');
       const tokenArray = await this.store.readAll();
+      await this.store.getSalt();
 
       this.tokens = tokenArray.filter(token => token.enable !== false).map(token => ({
         ...token,
@@ -675,7 +676,14 @@ class TokenManager {
    * @param {string} modelId - 使用的模型 ID
    */
   async recordRequest(token, modelId) {
-    if (!token || !modelId) return;
+    if (!token) return;
+
+    // 请求计数策略依赖该计数
+    if (token.refresh_token) {
+      this.incrementRequestCount(token.refresh_token);
+    }
+
+    if (!modelId) return;
 
     try {
       const salt = await this.store.getSalt();
@@ -1085,6 +1093,7 @@ class TokenManager {
       const listIndex = (startIndex + i) % totalAvailable;
       const tokenIndex = this.availableQuotaTokenIndices[listIndex];
       const token = this.tokens[tokenIndex];
+      if (!token) continue;
 
       // 如果提供了 modelId 且不是所有 token 都耗尽，检查该 token 对该模型是否可用
       if (modelId && !allTokensExhausted) {
@@ -1178,6 +1187,7 @@ class TokenManager {
     for (let i = 0; i < totalTokens; i++) {
       const index = (startIndex + i) % totalTokens;
       const token = this.tokens[index];
+      if (!token) continue;
 
       // 如果提供了 modelId 且不是所有 token 都耗尽，检查该 token 对该模型是否可用
       if (modelId && !allTokensExhausted) {

@@ -1,6 +1,7 @@
 import assert from 'assert';
 import config from '../src/config/config.js';
 import { rewriteErrorPayloadMessage } from '../src/utils/errorRewrite.js';
+import { buildGeminiErrorPayload, buildOpenAIErrorPayload, createApiError } from '../src/utils/errors.js';
 
 function clone(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -115,6 +116,66 @@ function run() {
       code: basePayload.error.code
     });
     assert.strictEqual(result.error.message, 'first');
+
+    // case 4: gemini payload should keep upstream status and allow type/status based matching
+    config.errorRewrite = {
+      enabled: true,
+      rules: [
+        {
+          id: 'rule-gemini-invalid-arg',
+          enabled: true,
+          logic: 'and',
+          scope: ['gemini'],
+          match: {
+            statusCodes: [400],
+            typeExact: ['INVALID_ARGUMENT'],
+            codeExact: ['400'],
+            messageExact: [],
+            messageContains: ['temperature: range: 0..1'],
+            rawExact: [],
+            rawContains: []
+          },
+          rewrite: {
+            mode: 'replace',
+            message: '请将温度设置在0-1'
+          }
+        }
+      ]
+    };
+    const geminiRaw = '{"error":{"code":400,"message":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"temperature: range: 0..1\\"},\\"request_id\\":\\"req_demo\\"}","status":"INVALID_ARGUMENT"}}';
+    const geminiError = createApiError(`API请求失败 (400): ${geminiRaw}`, 400, geminiRaw);
+    const geminiPayload = buildGeminiErrorPayload(geminiError, 400, { scope: 'gemini' });
+    assert.strictEqual(geminiPayload.error.status, 'INVALID_ARGUMENT');
+    assert.strictEqual(geminiPayload.error.message, '请将温度设置在0-1');
+
+    // case 5: openai payload should extract nested upstream type/message for matching
+    config.errorRewrite = {
+      enabled: true,
+      rules: [
+        {
+          id: 'rule-openai-nested',
+          enabled: true,
+          logic: 'and',
+          scope: ['openai'],
+          match: {
+            statusCodes: [400],
+            typeExact: ['invalid_request_error'],
+            codeExact: ['400'],
+            messageExact: [],
+            messageContains: ['temperature: range: 0..1'],
+            rawExact: [],
+            rawContains: []
+          },
+          rewrite: {
+            mode: 'replace',
+            message: 'temperature 参数必须在 0 到 1 之间'
+          }
+        }
+      ]
+    };
+    const openaiPayload = buildOpenAIErrorPayload(geminiError, 400, { scope: 'openai' });
+    assert.strictEqual(openaiPayload.error.type, 'invalid_request_error');
+    assert.strictEqual(openaiPayload.error.message, 'temperature 参数必须在 0 到 1 之间');
 
     console.log('✅ error rewrite tests passed');
   } finally {

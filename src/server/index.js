@@ -16,6 +16,7 @@ import { getPublicDir, getRelativePath } from '../utils/paths.js';
 import { errorHandler } from '../utils/errors.js';
 import { getChunkPoolSize, clearChunkPool } from './stream.js';
 import ipBlockManager from '../utils/ipBlockManager.js';
+import { resolveApiKeyAuth } from './api_key_auth.js';
 
 // 路由模块
 import adminRouter from '../routes/admin.js';
@@ -94,54 +95,31 @@ app.use((req, res, next) => {
   const isProtectedPath =
     req.path.startsWith('/v1/') ||
     req.path.startsWith('/v1beta/') ||
-    req.path.startsWith('/cli/v1/');
+    req.path.startsWith('/cli/v1/') ||
+    req.path.startsWith('/cli/v1beta/');
 
   if (!isProtectedPath) {
     return next();
   }
 
-  const primaryApiKey = config.security?.apiKey;
-  const bypassApiKeys = Array.isArray(config.security?.bypassThresholdApiKeys)
-    ? config.security.bypassThresholdApiKeys
-    : [];
-  const authRequired = Boolean(primaryApiKey) || bypassApiKeys.length > 0;
+  const authResult = resolveApiKeyAuth({
+    pathname: req.path,
+    headers: req.headers,
+    query: req.query,
+    primaryApiKey: config.security?.apiKey,
+    bypassApiKeys: config.security?.bypassThresholdApiKeys
+  });
 
-  const pickFirstString = (value) => {
-    const first = Array.isArray(value) ? value[0] : value;
-    return typeof first === 'string' ? first.trim() : '';
-  };
-
-  let providedKey = '';
-  if (req.path.startsWith('/v1beta/')) {
-    const queryKey = pickFirstString(req.query?.key);
-    const headerKey = pickFirstString(req.headers['x-goog-api-key']);
-    providedKey = queryKey || headerKey;
-  } else {
-    const authHeader = pickFirstString(req.headers.authorization);
-    const xApiKey = pickFirstString(req.headers['x-api-key']);
-    const hasBearerPrefix = authHeader.toLowerCase().startsWith('bearer ');
-    const bearerKey = hasBearerPrefix ? authHeader.slice(7).trim() : '';
-    // 优先使用 Bearer 和 x-api-key，最后才回退到原始 Authorization 值
-    providedKey = bearerKey || xApiKey || authHeader;
-  }
-
-  let keyType = null;
-  if (providedKey && primaryApiKey && providedKey === primaryApiKey) {
-    keyType = 'primary';
-  } else if (providedKey && bypassApiKeys.includes(providedKey) && providedKey !== primaryApiKey) {
-    keyType = 'bypass';
-  }
-
-  if (authRequired && !keyType) {
+  if (authResult.authRequired && !authResult.isAuthenticated) {
     ipBlockManager.recordViolation(req.ip, 'auth_fail');
     logger.warn(`API Key 验证失败: ${req.method} ${req.path}`);
     return res.status(401).json({ error: 'Invalid API Key' });
   }
 
   req.apiAuthContext = {
-    isAuthenticated: keyType !== null,
-    isBypassThreshold: keyType === 'bypass',
-    keyType: keyType || null
+    isAuthenticated: authResult.isAuthenticated,
+    isBypassThreshold: authResult.isBypassThreshold,
+    keyType: authResult.keyType || null
   };
 
   next();

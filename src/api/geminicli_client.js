@@ -260,9 +260,8 @@ export function disableCurrentToken(token) {
 /**
  * 记录请求（用于轮询策略）
  * @param {Object} token - Token 对象
+ * @param {string|null} [modelId] - 模型 ID（用于额度预估）
  */
-export function recordRequest(token) {
-  if (token && token.refresh_token) {
-    geminicliTokenManager.incrementRequestCount(token.refresh_token);
-  }
+export function recordRequest(token, modelId = null) {
+  return geminicliTokenManager.recordRequest(token, modelId);
 }
