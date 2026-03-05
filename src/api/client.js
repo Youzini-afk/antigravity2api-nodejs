@@ -37,13 +37,112 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ==================== Token 计时器管理 ====================
 const tokenTimers = new Map(); // { tokenKey: { lastUsed: timestamp, intervalId: intervalId } }
 const TOKEN_TIMEOUT = 3 * 60 * 1000; // 3分钟
-const BACKEND_CALL_INTERVAL = 60 * 1000; // 60秒
+const unleashControl = {
+  enabled: config.unleashControl?.enabled !== false,
+  callIntervalMs: Number.isFinite(config.unleashControl?.callIntervalMs) ? config.unleashControl.callIntervalMs : 60 * 1000,
+  failureBackoffMs: Number.isFinite(config.unleashControl?.failureBackoffMs) ? config.unleashControl.failureBackoffMs : 5 * 60 * 1000,
+  failureThreshold: Number.isFinite(config.unleashControl?.failureThreshold) ? config.unleashControl.failureThreshold : 3,
+  fallbackToAxios: config.unleashControl?.fallbackToAxios !== false,
+  endpoints: {
+    register: config.unleashControl?.endpoints?.register !== false,
+    feature: config.unleashControl?.endpoints?.feature !== false,
+    frontend: config.unleashControl?.endpoints?.frontend !== false
+  }
+};
+const BACKEND_CALL_INTERVAL = unleashControl.callIntervalMs;
+const UNLEASH_FAILURE_BACKOFF = unleashControl.failureBackoffMs;
+const UNLEASH_FAILURE_THRESHOLD = unleashControl.failureThreshold;
 
 function getTokenKey(token) {
   return token.access_token;
 }
 
+function getTokenSuffix(token) {
+  return token?.access_token ? token.access_token.slice(-8) : 'unknown';
+}
+
+function isTransientNetworkError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  if (code === 'ECONNRESET' || code === 'EPIPE' || code === 'ETIMEDOUT') return true;
+  if (message.includes('eof')) return true;
+  if (message.includes('socket hang up')) return true;
+  if (message.includes('connection reset')) return true;
+  if (message.includes('network error')) return true;
+  if (message.includes('timeout')) return true;
+  return false;
+}
+
+function formatError(error) {
+  if (!error) return 'unknown error';
+  const code = error.code ? `${error.code}: ` : '';
+  return `${code}${error.message || String(error)}`;
+}
+
+async function runTokenBackendCalls(token, timerData) {
+  if (!unleashControl.enabled) {
+    return;
+  }
+
+  const tasks = [];
+  if (unleashControl.endpoints.register) tasks.push({ name: 'ClientRegister', fn: () => sendClientRegister(token) });
+  if (unleashControl.endpoints.feature) tasks.push({ name: 'ClientFeature', fn: () => sendClientFeature(token) });
+  if (unleashControl.endpoints.frontend) tasks.push({ name: 'FrontEnd', fn: () => sendFrontEnd(token) });
+
+  if (tasks.length === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  if (timerData.unleashBackoffUntil && now < timerData.unleashBackoffUntil) {
+    return;
+  }
+  if (timerData.unleashInFlight) {
+    return;
+  }
+  timerData.unleashInFlight = true;
+
+  try {
+    const results = await Promise.allSettled(tasks.map(task => task.fn()));
+
+    const failures = results
+      .map((result, index) => ({ result, index }))
+      .filter(item => item.result.status === 'rejected')
+      .map(item => ({
+        name: tasks[item.index].name,
+        error: item.result.reason
+      }));
+
+    if (failures.length === 0) {
+      timerData.consecutiveUnleashFailures = 0;
+      timerData.unleashBackoffUntil = 0;
+      return;
+    }
+
+    timerData.consecutiveUnleashFailures = (timerData.consecutiveUnleashFailures || 0) + 1;
+    const allTransient = failures.every(item => isTransientNetworkError(item.error));
+    const brief = failures.map(item => `${item.name}=${formatError(item.error)}`).join(' | ');
+
+    if (allTransient && timerData.consecutiveUnleashFailures >= UNLEASH_FAILURE_THRESHOLD) {
+      timerData.unleashBackoffUntil = now + UNLEASH_FAILURE_BACKOFF;
+      logger.warn(`[Unleash] token ...${getTokenSuffix(token)} 连续 ${timerData.consecutiveUnleashFailures} 次网络失败，暂停上报 ${Math.round(UNLEASH_FAILURE_BACKOFF / 60000)} 分钟。最近错误: ${brief}`);
+      return;
+    }
+
+    logger.warn(`[Unleash] token ...${getTokenSuffix(token)} 周期上报失败(${failures.length}/${tasks.length}): ${brief}`);
+  } finally {
+    timerData.unleashInFlight = false;
+  }
+}
+
 function startTokenTimer(token) {
+  if (!unleashControl.enabled) {
+    return;
+  }
+  if (!unleashControl.endpoints.register && !unleashControl.endpoints.feature && !unleashControl.endpoints.frontend) {
+    return;
+  }
+
   const key = getTokenKey(token);
   const now = Date.now();
 
@@ -51,17 +150,22 @@ function startTokenTimer(token) {
     tokenTimers.get(key).lastUsed = now;
     return;
   }
-  sendClientRegister(token).catch(err => logger.warn('定时调用ClientRegister失败:', err.message));
-  sendClientFeature(token).catch(err => logger.warn('定时调用ClientFeature失败:', err.message));
-  sendFrontEnd(token).catch(err => logger.warn('定时调用FrontEnd失败:', err.message));
 
-  const intervalId = setInterval(() => {
-    sendClientRegister(token).catch(err => logger.warn('定时调用ClientRegister失败:', err.message));
-    sendClientFeature(token).catch(err => logger.warn('定时调用ClientFeature失败:', err.message));
-    sendFrontEnd(token).catch(err => logger.warn('定时调用FrontEnd失败:', err.message));
+  const timerData = {
+    lastUsed: now,
+    intervalId: null,
+    consecutiveUnleashFailures: 0,
+    unleashBackoffUntil: 0,
+    unleashInFlight: false
+  };
+
+  timerData.intervalId = setInterval(() => {
+    void runTokenBackendCalls(token, timerData);
   }, BACKEND_CALL_INTERVAL);
+  timerData.intervalId.unref?.();
 
-  tokenTimers.set(key, { lastUsed: now, intervalId });
+  tokenTimers.set(key, timerData);
+  void runTokenBackendCalls(token, timerData);
 }
 
 function checkTokenTimeout() {
@@ -74,7 +178,8 @@ function checkTokenTimeout() {
   }
 }
 
-setInterval(checkTokenTimeout, 30 * 1000); // 每30秒检查一次超时
+const tokenTimeoutChecker = setInterval(checkTokenTimeout, 30 * 1000); // 每30秒检查一次超时
+tokenTimeoutChecker.unref?.();
 
 // 请求客户端：优先使用 FingerprintRequester，失败则自动降级到 axios
 let requester = null;
@@ -585,72 +690,77 @@ export async function sendRecordCodeAssistMetrics(token, trajectoryId) {
   }
 }
 
+async function sendUnleashRequest({ method, url, headers, data = null, label, acceptedStatuses = [200, 202] }) {
+  const accepted = new Set(acceptedStatuses);
+  const axiosRequest = () => httpRequest({
+    method,
+    url,
+    headers: { ...headers },
+    ...(data !== null ? { data } : {})
+  });
+
+  if (useAxios) {
+    await axiosRequest();
+    return;
+  }
+
+  const requesterHeaders = { ...headers };
+  if (data !== null) {
+    const serialized = typeof data === 'string' ? data : JSON.stringify(data);
+    requesterHeaders['Content-Length'] = String(Buffer.byteLength(serialized));
+  }
+
+  try {
+    const response = await requester.antigravity_fetch(
+      url,
+      buildRequesterConfig(requesterHeaders, data, method)
+    );
+    if (!accepted.has(response.status)) {
+      const errorBody = await response.text();
+      throw new Error(`${label}请求失败 (${response.status}): ${errorBody}`);
+    }
+  } catch (error) {
+    if (!isTransientNetworkError(error) || !unleashControl.fallbackToAxios) {
+      throw error;
+    }
+
+    // FingerprintRequester 出现 EOF/网络类错误时回退 axios，避免非关键上报任务持续抖动
+    await axiosRequest();
+  }
+}
+
 export async function sendClientRegister(token) {
   const requestBody = buildClientRegister(token);
   const headers = buildClientRegisterHeaders(token);
-  try {
-    if (useAxios) {
-      await httpRequest({
-        method: 'POST',
-        url: config.api.unleash.register,
-        headers,
-        data: requestBody
-      });
-    } else {
-      const response = await requester.antigravity_fetch(config.api.unleash.register, buildRequesterConfig(headers, requestBody));
-      if (response.status !== 200 && response.status !== 202) {
-        const errorBody = await response.text();
-        throw new Error(`ClientRegister请求失败 (${response.status}): ${errorBody}`);
-      }
-    }
-  } catch (error) {
-    throw error;
-  }
+  await sendUnleashRequest({
+    method: 'POST',
+    url: config.api.unleash.register,
+    headers,
+    data: requestBody,
+    label: 'ClientRegister'
+  });
 }
 
 export async function sendClientFeature(token) {
   const headers = buildClientFeatrueHeaders(token);
-  //console.log(headers);
-  try {
-    if (useAxios) {
-      await httpRequest({
-        method: 'GET',
-        url: config.api.unleash.features,
-        headers
-      });
-    } else {
-      const response = await requester.antigravity_fetch(config.api.unleash.features, buildRequesterConfig(headers, null, "GET"));
-      if (response.status !== 200 && response.status !== 202) {
-        const errorBody = await response.text();
-        throw new Error(`ClientFeature请求失败 (${response.status}): ${errorBody}`);
-      }
-    }
-  } catch (error) {
-    throw error;
-  }
+  await sendUnleashRequest({
+    method: 'GET',
+    url: config.api.unleash.features,
+    headers,
+    label: 'ClientFeature'
+  });
 }
 
 export async function sendFrontEnd(token) {
   const requestBody = buildFrontEnd(token);
   const headers = buildFrontEndHeaders(token);
-  try {
-    if (useAxios) {
-      await httpRequest({
-        method: 'POST',
-        url: config.api.unleash.frontend,
-        headers,
-        data: requestBody
-      });
-    } else {
-      const response = await requester.antigravity_fetch(config.api.unleash.frontend, buildRequesterConfig(headers, requestBody));
-      if (response.status !== 200 && response.status !== 202) {
-        const errorBody = await response.text();
-        throw new Error(`FrontEnd请求失败 (${response.status}): ${errorBody}`);
-      }
-    }
-  } catch (error) {
-    throw error;
-  }
+  await sendUnleashRequest({
+    method: 'POST',
+    url: config.api.unleash.frontend,
+    headers,
+    data: requestBody,
+    label: 'FrontEnd'
+  });
 }
 
 export function closeRequester() {

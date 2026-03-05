@@ -52,7 +52,6 @@ export function buildClientRegisterHeaders(token) {
   return {
     "Host": "antigravity-unleash.goog",
     "User-Agent": "codeium-language-server",
-    "Content-Length": "562",
     "Authorization": `*:${unleashToken}`,
     "Content-Type": "application/json",
     "Unleash-Appname": "codeium-language-server",
@@ -86,7 +85,6 @@ export function buildFrontEndHeaders(token) {
     "Unleash-Appname": "codeium-extension",
     "Unleash-Connection-Id": randomUUID(),
     "Unleash-Sdk": "unleash-client-js:3.7.8",
-    "Content-Length": "532",
   }
 }
 

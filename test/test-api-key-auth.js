@@ -44,6 +44,36 @@ function run() {
   assert.strictEqual(result.isAuthenticated, true);
   assert.strictEqual(result.keyType, 'bypass');
 
+  // 同一请求同时携带 primary 与 bypass（不同 key）：
+  // 应按候选顺序选择首个命中的有效 key（v1 下 Authorization 优先）
+  result = resolveApiKeyAuth({
+    pathname: '/v1/chat/completions',
+    headers: {
+      authorization: 'Bearer sk-bypass-1',
+      'x-api-key': 'sk-primary'
+    },
+    query: {},
+    primaryApiKey: 'sk-primary',
+    bypassApiKeys: ['sk-bypass-1']
+  });
+  assert.strictEqual(result.isAuthenticated, true);
+  assert.strictEqual(result.keyType, 'bypass');
+  assert.strictEqual(result.isBypassThreshold, true);
+
+  // v1beta 下 query/key 优先于 header
+  result = resolveApiKeyAuth({
+    pathname: '/v1beta/models/gemini-2.5-pro:generateContent',
+    headers: {
+      authorization: 'Bearer sk-primary'
+    },
+    query: { key: 'sk-bypass-1' },
+    primaryApiKey: 'sk-primary',
+    bypassApiKeys: ['sk-bypass-1']
+  });
+  assert.strictEqual(result.isAuthenticated, true);
+  assert.strictEqual(result.keyType, 'bypass');
+  assert.strictEqual(result.isBypassThreshold, true);
+
   // 同一 key 同时出现在 primary 与 bypass：按 primary 语义处理
   result = resolveApiKeyAuth({
     pathname: '/v1/chat/completions',

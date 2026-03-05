@@ -37,6 +37,15 @@ RUN mkdir -p /app/data /app/public/images && \
     echo "" >> /app/.env && \
     echo "# 可选配置" >> /app/.env && \
     echo "# PROXY=http://127.0.0.1:7890" >> /app/.env && \
+    echo "# Unleash 定时上报控制（1 开启，0 关闭）" >> /app/.env && \
+    echo "# UNLEASH_REPORT_ENABLED=1" >> /app/.env && \
+    echo "# UNLEASH_REPORT_REGISTER=1" >> /app/.env && \
+    echo "# UNLEASH_REPORT_FEATURE=1" >> /app/.env && \
+    echo "# UNLEASH_REPORT_FRONTEND=1" >> /app/.env && \
+    echo "# UNLEASH_CALL_INTERVAL_MS=60000" >> /app/.env && \
+    echo "# UNLEASH_FAILURE_THRESHOLD=3" >> /app/.env && \
+    echo "# UNLEASH_FAILURE_BACKOFF_MS=300000" >> /app/.env && \
+    echo "# UNLEASH_FALLBACK_TO_AXIOS=1" >> /app/.env && \
     echo "" >> /app/.env && \
     echo "# 反代系统提示词" >> /app/.env && \
     echo "SYSTEM_INSTRUCTION=你是聊天机器人，名字叫萌萌，如同名字这般，你的性格是软软糯糯萌萌哒的，专门为用户提供聊天和情绪价值，协助进行小说创作或者角色扮演" >> /app/.env && \
@@ -82,6 +91,14 @@ sync_env "ADMIN_USERNAME"
 sync_env "ADMIN_PASSWORD"
 sync_env "JWT_SECRET"
 sync_env "PROXY"
+sync_env "UNLEASH_REPORT_ENABLED"
+sync_env "UNLEASH_REPORT_REGISTER"
+sync_env "UNLEASH_REPORT_FEATURE"
+sync_env "UNLEASH_REPORT_FRONTEND"
+sync_env "UNLEASH_CALL_INTERVAL_MS"
+sync_env "UNLEASH_FAILURE_THRESHOLD"
+sync_env "UNLEASH_FAILURE_BACKOFF_MS"
+sync_env "UNLEASH_FALLBACK_TO_AXIOS"
 sync_env "SYSTEM_INSTRUCTION"
 sync_env "OFFICIAL_SYSTEM_PROMPT"
 sync_env "IMAGE_BASE_URL"

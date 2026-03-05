@@ -6,7 +6,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const envPath = path.join(__dirname, '../../.env');
 
-const sensitiveKeys = ['API_KEY', 'BYPASS_THRESHOLD_API_KEYS', 'ADMIN_USERNAME', 'ADMIN_PASSWORD', 'JWT_SECRET', 'PROXY', 'SYSTEM_INSTRUCTION', 'IMAGE_BASE_URL'];
+const sensitiveKeys = [
+  'API_KEY',
+  'BYPASS_THRESHOLD_API_KEYS',
+  'ADMIN_USERNAME',
+  'ADMIN_PASSWORD',
+  'JWT_SECRET',
+  'PROXY',
+  'SYSTEM_INSTRUCTION',
+  'IMAGE_BASE_URL',
+  'UNLEASH_REPORT_ENABLED',
+  'UNLEASH_REPORT_REGISTER',
+  'UNLEASH_REPORT_FEATURE',
+  'UNLEASH_REPORT_FRONTEND',
+  'UNLEASH_CALL_INTERVAL_MS',
+  'UNLEASH_FAILURE_THRESHOLD',
+  'UNLEASH_FAILURE_BACKOFF_MS',
+  'UNLEASH_FALLBACK_TO_AXIOS'
+];
 
 if (fs.existsSync(envPath)) {
   let envContent = fs.readFileSync(envPath, 'utf8');

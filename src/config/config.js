@@ -33,6 +33,26 @@ function getFirstNonEmptyEnv(keys) {
   return '';
 }
 
+function parseBooleanEnv(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return fallback;
+}
+
+function parsePositiveIntEnv(envName, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const raw = process.env[envName];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return fallback;
+  const intValue = Math.floor(value);
+  if (intValue < min) return min;
+  if (intValue > max) return max;
+  return intValue;
+}
+
 /**
  * 生成或获取 API_KEY
  * 如果用户未配置，自动生成随机密钥
@@ -66,12 +86,15 @@ function parseBypassThresholdApiKeys() {
   const normalizedRaw = raw
     .replace(/\r\n/g, '\n')
     .replace(/\\n/g, '\n');
-  const parts = normalizedRaw.split(/[\n,]/);
+  const parts = normalizedRaw.split(/[\n,;，；]/);
   const result = [];
   const seen = new Set();
 
   for (const part of parts) {
-    const value = part.trim();
+    const value = part
+      .trim()
+      .replace(/^['"]+/, '')
+      .replace(/['"]+$/, '');
     if (!value || seen.has(value)) continue;
     seen.add(value);
     result.push(value);
@@ -174,6 +197,15 @@ if (!fs.existsSync(envPath)) {
 
 # 可选配置
 # PROXY=http://127.0.0.1:7890
+# Unleash 定时上报开关（1 开启，0 关闭）
+# UNLEASH_REPORT_ENABLED=1
+# UNLEASH_REPORT_REGISTER=1
+# UNLEASH_REPORT_FEATURE=1
+# UNLEASH_REPORT_FRONTEND=1
+# UNLEASH_CALL_INTERVAL_MS=60000
+# UNLEASH_FAILURE_THRESHOLD=3
+# UNLEASH_FAILURE_BACKOFF_MS=300000
+# UNLEASH_FALLBACK_TO_AXIOS=1
 
 # 反代系统提示词
 SYSTEM_INSTRUCTION=${DEFAULT_SYSTEM_INSTRUCTION}
@@ -581,6 +613,18 @@ export function buildConfig(jsonConfig) {
       maxRequestSize: jsonConfig.server?.maxRequestSize || DEFAULT_MAX_REQUEST_SIZE,
       apiKey: getApiKey(),
       bypassThresholdApiKeys: parseBypassThresholdApiKeys()
+    },
+    unleashControl: {
+      enabled: parseBooleanEnv(process.env.UNLEASH_REPORT_ENABLED, true),
+      callIntervalMs: parsePositiveIntEnv('UNLEASH_CALL_INTERVAL_MS', 60 * 1000, { min: 5000 }),
+      failureBackoffMs: parsePositiveIntEnv('UNLEASH_FAILURE_BACKOFF_MS', 5 * 60 * 1000, { min: 1000 }),
+      failureThreshold: parsePositiveIntEnv('UNLEASH_FAILURE_THRESHOLD', 3, { min: 1, max: 100 }),
+      fallbackToAxios: parseBooleanEnv(process.env.UNLEASH_FALLBACK_TO_AXIOS, true),
+      endpoints: {
+        register: parseBooleanEnv(process.env.UNLEASH_REPORT_REGISTER, true),
+        feature: parseBooleanEnv(process.env.UNLEASH_REPORT_FEATURE, true),
+        frontend: parseBooleanEnv(process.env.UNLEASH_REPORT_FRONTEND, true)
+      }
     },
     admin: getAdminCredentials(),
     useNativeAxios: jsonConfig.other?.useNativeAxios !== false,

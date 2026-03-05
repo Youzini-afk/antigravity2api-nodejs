@@ -78,10 +78,18 @@ export function resolveApiKeyAuth({
   const authRequired = Boolean(primary) || bypassList.length > 0;
 
   let keyType = null;
-  if (primary && candidates.includes(primary)) {
-    keyType = 'primary';
-  } else if (candidates.some((key) => key !== primary && bypassList.includes(key))) {
-    keyType = 'bypass';
+  // 按候选顺序判定（v1: header 优先, v1beta: query/x-goog-api-key 优先）。
+  // 这样可避免同一请求同时携带主/特殊 key 时被“全局主 key 优先”误覆盖。
+  for (const key of candidates) {
+    if (primary && key === primary) {
+      keyType = 'primary';
+      break;
+    }
+    // 同一 key 若既是 primary 又在 bypass 列表中，上面的 primary 分支会优先命中
+    if (key !== primary && bypassList.includes(key)) {
+      keyType = 'bypass';
+      break;
+    }
   }
 
   return {
@@ -91,4 +99,3 @@ export function resolveApiKeyAuth({
     keyType
   };
 }
-
