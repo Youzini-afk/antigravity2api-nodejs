@@ -12,6 +12,7 @@ import TokenStore from './token_store.js';
 import { TokenError } from '../utils/errors.js';
 import quotaManager from './quota_manager.js';
 import tokenCooldownManager from './token_cooldown_manager.js';
+import { randomUUID } from 'crypto';
 
 // 轮询策略枚举
 const RotationStrategy = {
@@ -116,7 +117,9 @@ class TokenManager {
         ...token,
         ...normalizeTokenThresholdControl(token),
         sessionId: generateSessionId(),
-        instanceId: generateInstanceId()
+        instanceId: generateInstanceId(),
+        deviceId: randomUUID(),
+        sub: token?.sub ? token?.sub : "g1-pro-tier"
       }));
 
       this.currentIndex = 0;
@@ -322,8 +325,9 @@ class TokenManager {
   async fetchProjectId(token) {
     // 步骤1: 尝试 loadCodeAssist
     try {
-      const projectId = await this._tryLoadCodeAssist(token);
-      if (projectId) return projectId;
+
+      const {projectId,sub} = await this._tryLoadCodeAssist(token) || {};
+      if (projectId) return {projectId,sub};
       log.warn('[fetchProjectId] loadCodeAssist 未返回 projectId，回退到 onboardUser');
     } catch (err) {
       log.warn(`[fetchProjectId] loadCodeAssist 失败: ${err.message}，回退到 onboardUser`);
@@ -331,13 +335,13 @@ class TokenManager {
 
     // 步骤2: 回退到 onboardUser
     try {
-      const projectId = await this._tryOnboardUser(token);
-      if (projectId) return projectId;
+      const {projectId,sub} = await this._tryOnboardUser(token) || {};
+      if (projectId) return {projectId, sub};
       log.error('[fetchProjectId] loadCodeAssist 和 onboardUser 均未能获取 projectId');
-      return undefined;
+      return {projectId: undefined, sub: "free-tier"};
     } catch (err) {
       log.error(`[fetchProjectId] onboardUser 失败: ${err.message}`);
-      return undefined;
+      return {projectId: undefined, sub: "free-tier"};
     }
   }
 
@@ -376,12 +380,14 @@ class TokenManager {
     // log.info(`[loadCodeAssist] 响应: ${JSON.stringify(data)}`); // 响应可能很大，不打印
 
     // 检查是否有 currentTier（表示用户已激活）
+    let sub = "free-tier";
     if (data?.currentTier) {
       log.info('[loadCodeAssist] 用户已激活');
       const projectId = data.cloudaicompanionProject;
       if (projectId) {
         log.info(`[loadCodeAssist] 成功获取 projectId: ${projectId}`);
-        return projectId;
+        sub = data.currentTier.id;
+        return {projectId, sub};
       }
       log.warn('[loadCodeAssist] 响应中无 projectId');
       return null;
@@ -444,6 +450,7 @@ class TokenManager {
       // log.info(`[onboardUser] 响应: ${JSON.stringify(data)}`); // 响应可能很大，不打印
 
       // 检查长时间运行操作是否完成
+      let sub = "g1-pro-tier";
       if (data?.done) {
         log.info('[onboardUser] 操作完成');
         const responseData = data.response || {};
@@ -458,7 +465,7 @@ class TokenManager {
 
         if (projectId) {
           log.info(`[onboardUser] 成功获取 projectId: ${projectId}`);
-          return projectId;
+          return {projectId,sub};
         }
         log.warn('[onboardUser] 操作完成但响应中无 projectId');
         return null;
@@ -543,13 +550,14 @@ class TokenManager {
       await this.refreshToken(tokenData);
     }
 
-    const projectId = await this.fetchProjectId(tokenData);
+    const {projectId,sub} = await this.fetchProjectId(tokenData) || {};
     if (!projectId) {
       throw new TokenError('无法获取 projectId，该账号可能无资格', null, 400);
     }
 
     // 更新并保存
     tokenData.projectId = projectId;
+    tokenData.sub = sub;
     tokenData.hasQuota = true;
     this.saveToFile(tokenData);
 
@@ -557,6 +565,7 @@ class TokenManager {
     const memoryToken = this.tokens.find(t => t.refresh_token === tokenData.refresh_token);
     if (memoryToken) {
       memoryToken.projectId = projectId;
+      memoryToken.sub = sub;
       memoryToken.hasQuota = true;
     }
 
@@ -714,12 +723,13 @@ class TokenManager {
         this.saveToFile(token);
         log.info(`...${token.access_token.slice(-8)}: 使用随机生成的projectId: ${token.projectId}`);
       } else {
-        const projectId = await this.fetchProjectId(token);
+        const {projectId,sub} = await this.fetchProjectId(token) || {};
         if (projectId === undefined) {
           log.warn(`...${token.access_token.slice(-8)}: 无资格获取projectId，禁用账号`);
           return 'disable';
         }
         token.projectId = projectId;
+        token.sub = sub;
         this.saveToFile(token);
       }
     }
@@ -1297,6 +1307,9 @@ class TokenManager {
       }
       if (tokenData.hasQuota !== undefined) {
         newToken.hasQuota = tokenData.hasQuota;
+      }
+      if (tokenData.sub) {
+        newToken.sub = tokenData.sub;
       }
 
       allTokens.push(newToken);

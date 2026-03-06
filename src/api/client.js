@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import tokenManager from '../auth/token_manager.js';
 import config from '../config/config.js';
 import fingerprintRequester from '../requester.js';
@@ -8,6 +9,7 @@ import { httpRequest, httpStreamRequest } from '../utils/httpClient.js';
 import { generateTrajectorybody } from '../utils/trajectory.js';
 import { buildRecordCodeAssistMetricsBody } from '../utils/recordCodeAssistMetrics.js';
 import { createTelemetryBatch, serializeTelemetryBatch } from "../utils/createTelemetry.js"
+import { createLog1, createLog2 } from "../utils/additionalLogs.js"
 import { buildClientRegister, buildFrontEnd, buildClientFeatrueHeaders, buildClientRegisterHeaders, buildFrontEndHeaders } from "../utils/unleash.js"
 import { MODEL_LIST_CACHE_TTL, QA_PAIRS } from '../constants/index.js';
 import { createApiError } from '../utils/errors.js';
@@ -31,6 +33,7 @@ import { getUpstreamStatus, readUpstreamErrorBody, isCallerDoesNotHavePermission
 import { createStreamLineProcessor } from './streamLineProcessor.js';
 import { runAxiosSseStream, runNativeSseStream, postJsonAndParse } from './geminiTransport.js';
 import { parseGeminiCandidateParts, toOpenAIUsage } from './geminiResponseParser.js';
+import axios from 'axios';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -336,6 +339,8 @@ async function handleApiError(error, token, dumpId = null) {
 export async function generateAssistantResponse(requestBody, token, callback) {
   startTokenTimer(token);
   const trajectoryId = requestBody.requestId.split('/')[2];
+  const conversationId = randomUUID();
+  const messageId = randomUUID();
   const modelName = requestBody.model;
   const headers = buildHeaders(token);
   const dumpId = isDebugDumpEnabled() ? createDumpId('stream') : null;
@@ -381,8 +386,8 @@ export async function generateAssistantResponse(requestBody, token, callback) {
       await dumpStreamResponse(dumpId, streamCollector);
     }
     sendRecordCodeAssistMetrics(token, trajectoryId).catch(err => logger.warn('发送RecordCodeAssistMetrics失败:', err.message));
-    sendRecordTrajectoryAnalytics(token, num, trajectoryId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
-    //sendLog(token,num,trajectoryId).catch(err => logger.warn('发送log失败:', err.message))
+    sendRecordTrajectoryAnalytics(token, num, trajectoryId,messageId,conversationId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
+    sendLog(token,num,trajectoryId,conversationId,messageId).catch(err => logger.warn('发送log失败:', err.message));
   } catch (error) {
     try { processor.close(); } catch { }
     await handleApiError(error, token, dumpId);
@@ -497,6 +502,8 @@ export async function getModelsWithQuotas(token) {
 export async function generateAssistantResponseNoStream(requestBody, token) {
   startTokenTimer(token);
   const trajectoryId = requestBody.requestId.split('/')[2];
+  const conversationId = randomUUID();
+  const messageId = randomUUID();
   const modelName = requestBody.model;
   const headers = buildHeaders(token);
   const dumpId = isDebugDumpEnabled() ? createDumpId('no_stream') : null;
@@ -518,9 +525,8 @@ export async function generateAssistantResponseNoStream(requestBody, token) {
       rawFormat: 'json'
     });
     sendRecordCodeAssistMetrics(token, trajectoryId).catch(err => logger.warn('发送RecordCodeAssistMetrics失败:', err.message));
-    sendRecordTrajectoryAnalytics(token, num, trajectoryId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
-
-    //sendLog(token,num).catch(err => logger.warn('发送log失败:', err.message))
+    sendRecordTrajectoryAnalytics(token, num, trajectoryId,messageId,conversationId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
+    sendLog(token,num,trajectoryId,conversationId,messageId).catch(err => logger.warn('发送log失败:', err.message));
   } catch (error) {
     await handleApiError(error, token, dumpId);
   }
@@ -577,6 +583,8 @@ export async function generateAssistantResponseNoStream(requestBody, token) {
 export async function generateImageForSD(requestBody, token) {
   startTokenTimer(token);
   const trajectoryId = requestBody.requestId.split('/')[2];
+  const conversationId = randomUUID();
+  const messageId = randomUUID();
   const modelName = requestBody.model;
   const headers = buildHeaders(token);
   let data;
@@ -592,9 +600,6 @@ export async function generateImageForSD(requestBody, token) {
         headers,
         data: requestBody
       })).data;
-      sendRecordCodeAssistMetrics(token, trajectoryId).catch(err => logger.warn('发送RecordCodeAssistMetrics失败:', err.message));
-      sendRecordTrajectoryAnalytics(token, num, trajectoryId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
-      //sendLog(token,num).catch(err => logger.warn('发送log失败:', err.message));
     } else {
       const response = await requester.antigravity_fetch(config.api.noStreamUrl, buildRequesterConfig(headers, requestBody));
       if (response.status !== 200) {
@@ -602,13 +607,13 @@ export async function generateImageForSD(requestBody, token) {
         throw { status: response.status, message: errorBody };
       }
       data = await response.json();
-      //sendLog(token,num).catch(err => logger.warn('发送log失败:', err.message));
     }
   } catch (error) {
     await handleApiError(error, token);
   }
   sendRecordCodeAssistMetrics(token, trajectoryId).catch(err => logger.warn('发送RecordCodeAssistMetrics失败:', err.message));
-  sendRecordTrajectoryAnalytics(token, num, trajectoryId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
+  sendRecordTrajectoryAnalytics(token, num, trajectoryId,messageId,conversationId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
+  sendLog(token,num,trajectoryId,conversationId,messageId).catch(err => logger.warn('发送log失败:', err.message));
 
   const parts = data.response?.candidates?.[0]?.content?.parts || [];
   const images = parts.filter(p => p.inlineData).map(p => p.inlineData.data);
@@ -616,8 +621,8 @@ export async function generateImageForSD(requestBody, token) {
   return images;
 }
 
-export async function sendRecordTrajectoryAnalytics(token, num, trajectoryId, modelName = "claude-opus-4-6-thinking") {
-  const trajectorybody = generateTrajectorybody(num, trajectoryId, modelName);
+export async function sendRecordTrajectoryAnalytics(token, num, trajectoryId,executionId,cascadeId, modelName = "claude-opus-4-6-thinking") {
+  const trajectorybody = generateTrajectorybody(num, trajectoryId,executionId,cascadeId, modelName, token);
   const headers = buildHeaders(token);
   try {
     if (useAxios) {
@@ -638,29 +643,34 @@ export async function sendRecordTrajectoryAnalytics(token, num, trajectoryId, mo
     throw error;
   }
 }
-export async function sendLog(token, num, trajectoryId) {
-  const Logbody = createTelemetryBatch(num, trajectoryId);
-  const serializeData = serializeTelemetryBatch(Logbody);
-  const serializeLogBody = serializeData.data;
+export async function sendLog(token, num, trajectoryId, conversationId,messageId) {
+  const sessionId = trajectoryId;
+  //const conversationId = randomUUID();
+  
+  const logs = [
+    createLog2(conversationId, token, sessionId),
+    createTelemetryBatch(num, sessionId,conversationId,messageId,token.sub),
+    createLog1(conversationId, token, sessionId)
+  ];
+  
   const headers = buildHeaders(token);
   headers["Host"] = "play.googleapis.com";
   headers["User-Agent"] = "Go-http-client/1.1";
   headers["Content-Type"] = "application/octet-stream";
   headers["Accept-Encoding"] = "gzip";
+  
   try {
-    if (useAxios) {
-      await httpRequest({
+    for (const log of logs) {
+      const serializeData = serializeTelemetryBatch(log);
+      const serializeLogBody = serializeData.data;
+      headers["Content-Length"] = String(serializeLogBody.length);
+      
+      await axios({
         method: 'POST',
         url: "https://play.googleapis.com/log",
         headers,
         data: serializeLogBody
       });
-    } else {
-      const response = await requester.antigravity_fetch("https://play.googleapis.com/log", buildRequesterConfig(headers, serializeLogBody));
-      if (response.status !== 200) {
-        const errorBody = await response.text();
-        throw new Error(`log请求失败 (${response.status}): ${errorBody}`);
-      }
     }
   } catch (error) {
     throw error;

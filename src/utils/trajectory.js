@@ -4,10 +4,9 @@ import { generateCreatedAt } from "./utils.js"
 import config from '../config/config.js';
 
 
-let deviceId = randomUUID();
-function generateMetadata() {
+function generateMetadata(token) {
   return {
-    deviceFingerprint: deviceId,
+    deviceFingerprint: token.deviceId,
     extensionName: "antigravity",
     extensionPath: "d:\\Antigravity\\resources\\app\\extensions\\antigravity",
     hardware: "amd64",
@@ -15,8 +14,8 @@ function generateMetadata() {
     ideVersion: config.api.ideVersion,
     locale: "en",
     os: "windows",
-    regionCode: "CN",
-    userTierId: "g1-pro-tier"
+    regionCode: "JP",
+    userTierId: token.sub
   }
 }
 
@@ -901,9 +900,9 @@ function generateSteps(executionId, trajectoryId, cascadeId, num) {
   ]
 }
 
-function generateTrajectorybody(num, trajectoryId, modelName) {
-  let cascadeId = randomUUID();
-  let executionId = randomUUID();
+function generateTrajectorybody(num, trajectoryId,executionId,cascadeId, modelName, token) {
+  //let cascadeId = randomUUID();
+  //let executionId = randomUUID();
   return {
     trajectory: {
       cascadeId: cascadeId,
@@ -918,7 +917,7 @@ function generateTrajectorybody(num, trajectoryId, modelName) {
       trajectoryId: trajectoryId,
       trajectoryType: "CORTEX_TRAJECTORY_TYPE_CASCADE"
     },
-    metadata: generateMetadata()
+    metadata: generateMetadata(token)
   }
 }
 export {

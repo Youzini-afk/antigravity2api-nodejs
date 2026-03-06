@@ -19,16 +19,17 @@ message Event {
 }
 
 message Metadata {
+  OperationEvent operation_event = 6;
+  SessionEvent session_event = 11;
+  MessageEvent message_event = 12;
+  FileEvent file_event = 13;
   string app_name = 16;
   string version = 17;
   string os = 18;
   string arch = 19;
   string tier = 22;
+  int32 unknown_field_24 = 24;
   string region = 25;
-  
-  SessionEvent session_event = 11;
-  MessageEvent message_event = 12;
-  FileEvent file_event = 13;
 }
 
 message SessionEvent {
@@ -188,4 +189,14 @@ message FileDetails {
 message FileAttachment {
   string path = 1;
   bytes content = 2;
+}
+
+message OperationEvent {
+  string event_name = 1;
+  repeated KeyValuePair properties = 2;
+}
+
+message KeyValuePair {
+  string key = 1;
+  string value = 2;
 }
