@@ -4,6 +4,7 @@ import { QA_PAIRS } from '../constants/index.js';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import config from '../config/config.js';
+import { getProtoPath } from './paths.js';
 
 
 
@@ -354,9 +355,11 @@ function createTelemetryBatch(num, trajectoryId,conversationId,messageId, sub="f
   }
 }
 
-function serializeTelemetryBatch(telemetryData, protoPath = join(__dirname, 'proto', 'telemetry.proto')) {
+function serializeTelemetryBatch(telemetryData, protoPath = null) {
   try {
-    const root = protobuf.loadSync(protoPath);
+    // 使用统一的路径解析工具，支持 pkg 打包环境
+    const resolvedProtoPath = protoPath || getProtoPath('telemetry.proto');
+    const root = protobuf.loadSync(resolvedProtoPath);
     const TelemetryBatch = root.lookupType('TelemetryBatch');
 
     const message = TelemetryBatch.create(telemetryData);

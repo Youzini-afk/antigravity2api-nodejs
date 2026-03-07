@@ -209,6 +209,31 @@ export function getConfigPaths() {
 }
 
 /**
+ * 获取 proto 文件路径
+ * @param {string} protoFileName - proto 文件名（如 'telemetry.proto'）
+ * @returns {string} proto 文件路径
+ */
+export function getProtoPath(protoFileName) {
+  if (isPkg) {
+    // pkg 环境：优先使用可执行文件旁边的 src/utils/proto 目录
+    const exeDir = path.dirname(process.execPath);
+    const exeProtoPath = path.join(exeDir, 'src', 'utils', 'proto', protoFileName);
+    if (fs.existsSync(exeProtoPath)) {
+      return exeProtoPath;
+    }
+    // 其次使用当前工作目录的 src/utils/proto 目录
+    const cwdProtoPath = path.join(process.cwd(), 'src', 'utils', 'proto', protoFileName);
+    if (fs.existsSync(cwdProtoPath)) {
+      return cwdProtoPath;
+    }
+    // 返回可执行文件目录的路径（即使不存在）
+    return exeProtoPath;
+  }
+  // 开发环境
+  return path.join(__dirname, 'proto', protoFileName);
+}
+
+/**
  * 计算相对路径用于日志显示
  * @param {string} absolutePath - 绝对路径
  * @returns {string} 相对路径或原路径
