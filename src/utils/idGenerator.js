@@ -3,8 +3,13 @@ import { randomUUID, createHash, randomBytes } from 'crypto';
 function generateRequestId() {
   const timestamp = Date.now();
   const uuid = randomUUID();
-  const number = Math.floor(Math.random() * 10);
-  return `agent/${timestamp}/${uuid}/${number}`;
+  //const number = Math.floor(Math.random() * 10);
+  return `agent/${timestamp}/${uuid}/4`;
+}
+
+function generateCheckpointId() {
+  const uuid = randomUUID();
+  return `checkpoint/${uuid}`;
 }
 
 function generateSessionId() {
@@ -59,5 +64,6 @@ export {
     generateToolCallId,
     generateInstanceId,
     generateTokenId,
-    generateSalt
+    generateSalt,
+    generateCheckpointId
 }
