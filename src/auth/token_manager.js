@@ -1057,9 +1057,89 @@ class TokenManager {
    * @param {boolean} [options.bypassThreshold=false] - 是否跳过阈值过滤
    * @returns {Promise<Object|null>} token 对象
    */
-  async getToken(modelId = null, options = {}) {
+
+  /**
+   * 获取所有 token 中指定模型组的最早额度恢复时间
+   * @param {string} modelId - 模型 ID
+   * @returns {number|null} 最早恢复时间戳（毫秒），无数据返回 null
+   * @private
+   */
+  _getEarliestResetTimeAcrossTokens(modelId) {
+    if (!modelId) return null;
+    let earliestReset = null;
+
+    for (const token of this.tokens) {
+      try {
+        const salt = this.store._salt;
+        if (!salt) continue;
+        const tokenId = generateTokenId(token.refresh_token, salt);
+        const { resetTime } = quotaManager.getModelGroupResetTime(tokenId, modelId);
+        if (resetTime !== null) {
+          if (earliestReset === null || resetTime < earliestReset) {
+            earliestReset = resetTime;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return earliestReset;
+  }
+
+  /**
+   * 格式化恢复时间为 HH:MM（北京时间），加上配置的偏移量
+   * @param {number|null} resetTimeMs - 恢复时间戳（毫秒）
+   * @returns {string} 格式化的时间或 '未知'
+   * @private
+   */
+  _formatResetTime(resetTimeMs) {
+    if (!resetTimeMs) return '未知';
+    const offsetMinutes = config.tokenMessages?.resetTimeOffsetMinutes ?? 15;
+    const adjustedTime = new Date(resetTimeMs + offsetMinutes * 60 * 1000);
+    try {
+      return adjustedTime.toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Shanghai'
+      });
+    } catch {
+      return '未知';
+    }
+  }
+
+  /**
+   * 构造并抛出 TokenError，根据 reason 从配置中读取消息模板并替换占位符
+   * @param {string} reason - 不可用原因代码
+   * @param {string|null} modelId - 模型 ID
+   * @throws {TokenError}
+   * @private
+   */
+  _throwTokenUnavailable(reason, modelId = null) {
+    const messages = config.tokenMessages || {};
+    let template = messages[reason] || reason;
+
+    // 替换 {model} 占位符
+    if (modelId) {
+      template = template.replace(/\{model\}/g, modelId);
+    } else {
+      template = template.replace(/\{model\}/g, '未知模型');
+    }
+
+    // 替换 {reset_time} 占位符
+    if (template.includes('{reset_time}')) {
+      const resetTimeMs = this._getEarliestResetTimeAcrossTokens(modelId);
+      const formatted = this._formatResetTime(resetTimeMs);
+      template = template.replace(/\{reset_time\}/g, formatted);
+    }
+
+    log.warn(`[TokenManager] 凭证不可用 (reason=${reason}, model=${modelId || 'N/A'}): ${template}`);
+    throw new TokenError(template, null, 503, reason);
+  }
+
+    async getToken(modelId = null, options = {}) {
     await this._ensureInitialized();
-    if (this.tokens.length === 0) return null;
+    if (this.tokens.length === 0) this._throwTokenUnavailable('pool_empty', modelId);
 
     // 针对额度耗尽策略做单独的高性能处理
     if (this.rotationStrategy === RotationStrategy.QUOTA_EXHAUSTED) {
@@ -1083,7 +1163,7 @@ class TokenManager {
 
     const totalAvailable = this.availableQuotaTokenIndices.length;
     if (totalAvailable === 0) {
-      return null;
+      this._throwTokenUnavailable('quota_exhausted', modelId);
     }
 
     // 如果提供了 modelId，先检查是否所有 token 对该模型的额度都为 0
@@ -1131,7 +1211,7 @@ class TokenManager {
           this.disableToken(token);
           this._rebuildAvailableQuotaTokens();
           if (this.tokens.length === 0 || this.availableQuotaTokenIndices.length === 0) {
-            return null;
+            this._throwTokenUnavailable('all_disabled', modelId);
           }
           continue;
         }
@@ -1145,7 +1225,7 @@ class TokenManager {
           this.disableToken(token);
           this._rebuildAvailableQuotaTokens();
           if (this.tokens.length === 0 || this.availableQuotaTokenIndices.length === 0) {
-            return null;
+            this._throwTokenUnavailable('all_disabled', modelId);
           }
         }
         // skip: 继续尝试下一个 token
@@ -1164,7 +1244,7 @@ class TokenManager {
         }
       } else {
         log.warn(`阈值策略严格模式生效: 模型 ${modelId} 所有候选凭证均低于阈值，返回无可用凭证`);
-        return null;
+        this._throwTokenUnavailable('threshold_strict', modelId);
       }
     }
 
@@ -1223,7 +1303,7 @@ class TokenManager {
         const result = await this._prepareToken(token);
         if (result === 'disable') {
           this.disableToken(token);
-          if (this.tokens.length === 0) return null;
+          if (this.tokens.length === 0) this._throwTokenUnavailable('all_disabled', modelId);
           continue;
         }
 
@@ -1248,7 +1328,7 @@ class TokenManager {
         const action = this._handleTokenError(error, token);
         if (action === 'disable') {
           this.disableToken(token);
-          if (this.tokens.length === 0) return null;
+          if (this.tokens.length === 0) this._throwTokenUnavailable('all_disabled', modelId);
         }
         // skip: 继续尝试下一个 token
       }
@@ -1261,10 +1341,10 @@ class TokenManager {
         return this._tryGetFallbackToken(fallbackCandidates, this.rotationStrategy);
       }
       log.warn(`阈值策略严格模式生效: 模型 ${modelId} 所有候选凭证均低于阈值，返回无可用凭证`);
-      return null;
+      this._throwTokenUnavailable('threshold_strict', modelId);
     }
 
-    return null;
+    this._throwTokenUnavailable('model_exhausted', modelId);
   }
 
   disableCurrentToken(token) {

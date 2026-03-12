@@ -210,11 +210,13 @@ export class TokenError extends AppError {
    * @param {string} message - 错误消息
    * @param {string} tokenSuffix - Token 后缀（用于日志）
    * @param {number} statusCode - HTTP 状态码
+   * @param {string} reason - 不可用原因代码
    */
-  constructor(message, tokenSuffix = null, statusCode = 500) {
+  constructor(message, tokenSuffix = null, statusCode = 500, reason = null) {
     super(message, statusCode, 'token_error');
     this.name = 'TokenError';
     this.tokenSuffix = tokenSuffix;
+    this.reason = reason;
   }
 }
 

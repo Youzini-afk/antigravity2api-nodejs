@@ -83,4 +83,14 @@
     "cacheThinking": true,
     "fakeNonStream": true
   }
+,
+  "tokenMessages": {
+    "pool_empty": "凭证池为空，请先添加凭证（npm run login）",
+    "all_disabled": "所有凭证已被禁用，请检查凭证状态",
+    "quota_exhausted": "所有凭证额度已耗尽，预计 {reset_time} 恢复",
+    "model_exhausted": "模型 {model} 无可用凭证，预计 {reset_time} 恢复",
+    "threshold_strict": "模型 {model} 所有凭证均低于额度阈值（严格模式）",
+    "no_available": "没有可用的凭证",
+    "resetTimeOffsetMinutes": 15
+  }
 }

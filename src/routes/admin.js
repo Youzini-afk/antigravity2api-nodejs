@@ -289,6 +289,31 @@ function validateErrorRewritePolicy(policy, fieldPath = "errorRewrite") {
   return null;
 }
 
+const TOKEN_MESSAGE_VALID_KEYS = ['pool_empty', 'all_disabled', 'quota_exhausted', 'model_exhausted', 'threshold_strict', 'no_available'];
+
+function validateTokenMessages(input, fieldPath = "tokenMessages") {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return `${fieldPath} 必须是对象`;
+  }
+
+  for (const key of Object.keys(input)) {
+    if (key === 'resetTimeOffsetMinutes') {
+      if (typeof input[key] !== 'number' || !Number.isFinite(input[key]) || input[key] < 0) {
+        return `${fieldPath}.resetTimeOffsetMinutes 必须是非负数字`;
+      }
+      continue;
+    }
+    if (!TOKEN_MESSAGE_VALID_KEYS.includes(key)) {
+      return `${fieldPath}.${key} 不是有效的配置项，有效值: ${TOKEN_MESSAGE_VALID_KEYS.join(', ')}, resetTimeOffsetMinutes`;
+    }
+    if (typeof input[key] !== 'string') {
+      return `${fieldPath}.${key} 必须是字符串`;
+    }
+  }
+
+  return null;
+}
+
 // Token管理API - 需要JWT认证（使用 Cookie 优先）
 router.get("/tokens", cookieAuthMiddleware, async (req, res) => {
   try {
@@ -833,6 +858,19 @@ router.put("/config", cookieAuthMiddleware, (req, res) => {
         return res.status(400).json({
           success: false,
           message: errorRewriteErr,
+        });
+      }
+    }
+
+    if (jsonUpdates?.tokenMessages !== undefined) {
+      const tokenMsgErr = validateTokenMessages(
+        jsonUpdates.tokenMessages,
+        "json.tokenMessages",
+      );
+      if (tokenMsgErr) {
+        return res.status(400).json({
+          success: false,
+          message: tokenMsgErr,
         });
       }
     }

@@ -122,10 +122,6 @@ router.post('/img2img', async (req, res) => {
     }
     
     const token = await tokenManager.getToken();
-    if (!token) {
-      throw new Error('没有可用的token');
-    }
-    
     // 构建包含图片的消息
     const content = [{ type: 'text', text: prompt }];
     if (init_images && init_images.length > 0) {
@@ -166,10 +162,6 @@ router.post('/txt2img', async (req, res) => {
     }
     
     const token = await tokenManager.getToken();
-    if (!token) {
-      throw new Error('没有可用的token');
-    }
-    
     const requestBody = buildImageRequestBody(prompt, token);
     const images = await generateImageForSD(requestBody, token);
     

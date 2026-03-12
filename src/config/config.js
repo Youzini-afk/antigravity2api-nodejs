@@ -370,6 +370,18 @@ const DEFAULT_ERROR_REWRITE_POLICY = Object.freeze({
   rules: []
 });
 
+const DEFAULT_TOKEN_MESSAGES = Object.freeze({
+  pool_empty: '凭证池为空，请先添加凭证（npm run login）',
+  all_disabled: '所有凭证已被禁用，请检查凭证状态',
+  quota_exhausted: '所有凭证额度已耗尽，预计 {reset_time} 恢复',
+  model_exhausted: '模型 {model} 无可用凭证，预计 {reset_time} 恢复',
+  threshold_strict: '模型 {model} 所有凭证均低于额度阈值（严格模式）',
+  no_available: '没有可用的凭证'
+});
+const DEFAULT_RESET_TIME_OFFSET_MINUTES = 15;
+const TOKEN_MESSAGE_KEYS = Object.keys(DEFAULT_TOKEN_MESSAGES);
+
+
 function normalizeThresholdPolicy(policy) {
   const base = JSON.parse(JSON.stringify(DEFAULT_THRESHOLD_POLICY));
   if (!policy || typeof policy !== 'object') return base;
@@ -525,6 +537,24 @@ function normalizeErrorRewritePolicy(policy) {
  * @param {Object} jsonConfig - JSON 配置对象
  * @returns {Object} 当前 API 配置
  */
+
+function normalizeTokenMessages(input) {
+  const base = { ...DEFAULT_TOKEN_MESSAGES, resetTimeOffsetMinutes: DEFAULT_RESET_TIME_OFFSET_MINUTES };
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return base;
+
+  for (const key of TOKEN_MESSAGE_KEYS) {
+    if (typeof input[key] === 'string' && input[key].trim()) {
+      base[key] = input[key].trim();
+    }
+  }
+
+  if (typeof input.resetTimeOffsetMinutes === 'number' && Number.isFinite(input.resetTimeOffsetMinutes)) {
+    base.resetTimeOffsetMinutes = Math.max(0, Math.floor(input.resetTimeOffsetMinutes));
+  }
+
+  return base;
+}
+
 function getActiveApiConfig(jsonConfig) {
   const apiUse = jsonConfig.api?.use || 'production';
   const customConfig = jsonConfig.api?.[apiUse];
@@ -575,6 +605,7 @@ export function buildConfig(jsonConfig) {
     jsonConfig.geminicli?.rotation?.thresholdPolicy
   );
   const errorRewritePolicy = normalizeErrorRewritePolicy(jsonConfig.errorRewrite);
+  const tokenMessages = normalizeTokenMessages(jsonConfig.tokenMessages);
 
   return {
     server: {
@@ -593,6 +624,7 @@ export function buildConfig(jsonConfig) {
       thresholdPolicy: globalThresholdPolicy
     },
     errorRewrite: errorRewritePolicy,
+    tokenMessages,
     // 日志配置
     log: {
       maxSizeMB: jsonConfig.log?.maxSizeMB || 10,    // 单个日志文件最大 MB
