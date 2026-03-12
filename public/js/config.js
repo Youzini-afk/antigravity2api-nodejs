@@ -503,6 +503,16 @@ async function loadConfig() {
             renderErrorRewriteRules();
             handleErrorRewritePolicyChange();
 
+            // 加载凭证不可用消息配置
+            const tokenMessages = json.tokenMessages || {};
+            const tokenMsgKeys = ['pool_empty', 'all_disabled', 'quota_exhausted', 'model_exhausted', 'threshold_strict', 'no_available'];
+            tokenMsgKeys.forEach(key => {
+                const el = document.getElementById(`tokenMsg_${key}`);
+                if (el) el.value = tokenMessages[key] || '';
+            });
+            const offsetEl = document.getElementById('tokenMsg_resetTimeOffsetMinutes');
+            if (offsetEl) offsetEl.value = tokenMessages.resetTimeOffsetMinutes ?? 15;
+
             // 加载官方系统提示词
             if (form.elements['OFFICIAL_SYSTEM_PROMPT']) {
                 if (env.OFFICIAL_SYSTEM_PROMPT !== undefined) {
@@ -678,6 +688,29 @@ async function saveConfig(e) {
     jsonConfig.other.cacheThinking = form.elements['CACHE_THINKING']?.checked ?? true;
     jsonConfig.other.fakeNonStream = form.elements['FAKE_NON_STREAM']?.checked ?? true;
     jsonConfig.errorRewrite = getErrorRewritePolicyPayload();
+
+    // 收集凭证消息配置
+    const tokenMsgKeys = ['pool_empty', 'all_disabled', 'quota_exhausted', 'model_exhausted', 'threshold_strict', 'no_available'];
+    const tokenMessages = {};
+    let hasTokenMsg = false;
+    tokenMsgKeys.forEach(key => {
+        const el = document.getElementById(`tokenMsg_${key}`);
+        if (el && el.value.trim()) {
+            tokenMessages[key] = el.value.trim();
+            hasTokenMsg = true;
+        }
+    });
+    const offsetEl = document.getElementById('tokenMsg_resetTimeOffsetMinutes');
+    if (offsetEl && offsetEl.value !== '') {
+        const val = parseInt(offsetEl.value);
+        if (Number.isFinite(val) && val >= 0) {
+            tokenMessages.resetTimeOffsetMinutes = val;
+            hasTokenMsg = true;
+        }
+    }
+    if (hasTokenMsg) {
+        jsonConfig.tokenMessages = tokenMessages;
+    }
     const modelGroupPercentRaw = parseFloat(form.elements['ROTATION_THRESHOLD_MODEL_GROUP_PERCENT']?.value || '20');
     const globalPercentRaw = parseFloat(form.elements['ROTATION_THRESHOLD_GLOBAL_PERCENT']?.value || '20');
     const modelGroupPercent = Number.isFinite(modelGroupPercentRaw) ? Math.min(100, Math.max(0, modelGroupPercentRaw)) : 20;

@@ -407,6 +407,7 @@
                                     <option value="section-model">🎛️ 模型参数</option>
                                     <option value="section-rotation">🔄 轮询与性能</option>
                                     <option value="section-error-rewrite">🚨 错误改写</option>
+                                    <option value="section-token-messages">💬 凭证消息</option>
                                     <option value="section-security">🛡️ 安全管理</option>
                                 </select>
                                 <div class="settings-nav-list">
@@ -418,6 +419,8 @@
                                         onclick="setActiveSettingSection('section-rotation', true)">🔄 轮询与性能</button>
                                     <button type="button" class="settings-nav-item" data-target="section-error-rewrite"
                                         onclick="setActiveSettingSection('section-error-rewrite', true)">🚨 错误改写</button>
+                                    <button type="button" class="settings-nav-item" data-target="section-token-messages"
+                                        onclick="setActiveSettingSection('section-token-messages', true)">💬 凭证消息</button>
                                     <button type="button" class="settings-nav-item" data-target="section-security"
                                         onclick="setActiveSettingSection('section-security', true)">🛡️ 安全管理</button>
                                 </div>
@@ -777,6 +780,42 @@
                                             <div class="form-row-inline">
                                                 <button type="button" class="btn btn-info btn-sm" onclick="addErrorRewriteRule()">➕ 新增规则</button>
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 凭证不可用消息 -->
+                                    <div class="config-section" id="section-token-messages">
+                                        <h4>💬 凭证消息</h4>
+                                        <div class="security-info" style="margin-bottom: 0.75rem;">
+                                            <p>自定义凭证不可用时返回给客户端的错误消息。支持占位符：<code>{model}</code> = 模型名，<code>{reset_time}</code> = 预计恢复时间。</p>
+                                        </div>
+                                        <div class="form-group compact">
+                                            <label>凭证池为空 <span class="help-tip" data-tooltip="凭证池内没有任何凭证">?</span></label>
+                                            <input type="text" id="tokenMsg_pool_empty" placeholder="凭证池为空，请先添加凭证（npm run login）">
+                                        </div>
+                                        <div class="form-group compact">
+                                            <label>所有凭证已禁用 <span class="help-tip" data-tooltip="凭证池内有凭证但全部被禁用">?</span></label>
+                                            <input type="text" id="tokenMsg_all_disabled" placeholder="所有凭证已被禁用，请检查凭证状态">
+                                        </div>
+                                        <div class="form-group compact">
+                                            <label>额度已耗尽 <span class="help-tip" data-tooltip="额度耗尽策略下所有凭证的额度为零">?</span></label>
+                                            <input type="text" id="tokenMsg_quota_exhausted" placeholder="所有凭证额度已耗尽，预计 {reset_time} 恢复">
+                                        </div>
+                                        <div class="form-group compact">
+                                            <label>模型无可用凭证 <span class="help-tip" data-tooltip="指定模型的所有凭证额度耗尽或冷却中">?</span></label>
+                                            <input type="text" id="tokenMsg_model_exhausted" placeholder="模型 {model} 无可用凭证，预计 {reset_time} 恢复">
+                                        </div>
+                                        <div class="form-group compact">
+                                            <label>阈值严格模式 <span class="help-tip" data-tooltip="所有凭证均低于额度阈值且为严格模式">?</span></label>
+                                            <input type="text" id="tokenMsg_threshold_strict" placeholder="模型 {model} 所有凭证均低于额度阈值（严格模式）">
+                                        </div>
+                                        <div class="form-group compact">
+                                            <label>兜底消息 <span class="help-tip" data-tooltip="其他原因导致无可用凭证">?</span></label>
+                                            <input type="text" id="tokenMsg_no_available" placeholder="没有可用的凭证">
+                                        </div>
+                                        <div class="form-group compact">
+                                            <label>恢复时间偏移 (分钟) <span class="help-tip" data-tooltip="{reset_time} 在实际恢复时间上额外加的分钟数">?</span></label>
+                                            <input type="number" id="tokenMsg_resetTimeOffsetMinutes" min="0" placeholder="15">
                                         </div>
                                     </div>
 
