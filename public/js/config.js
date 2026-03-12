@@ -422,6 +422,8 @@ function handleClientRestrictionChange() {
     if (!container) return;
     container.style.opacity = enabled ? '1' : '0.6';
     container.querySelectorAll('input, select, textarea').forEach(el => {
+        // 带 name 属性的字段是环境变量，不应被禁用（FormData 不收集 disabled 字段）
+        if (el.name) return;
         el.disabled = !enabled;
     });
 }
