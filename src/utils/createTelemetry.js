@@ -1,14 +1,272 @@
 import { randomUUID } from "crypto";
 import protobuf from 'protobufjs';
 import { QA_PAIRS } from '../constants/index.js';
+import fs from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import config from '../config/config.js';
+import { getProjectRoot } from './paths.js';
 
 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const TELEMETRY_PROTO_FALLBACK = `syntax = "proto3";
+
+message TelemetryBatch {
+  SessionInfo session_info = 1;
+  int32 sequence_number = 2;
+  repeated Event events = 3;
+  int64 timestamp = 4;
+}
+
+message SessionInfo {
+  int32 value = 1;
+}
+
+message Event {
+  int64 timestamp_ms = 1;
+  int32 event_code = 2;
+  Metadata metadata = 6;
+  int32 event_type = 11;
+}
+
+message Metadata {
+  OperationEvent operation_event = 6;
+  SessionEvent session_event = 11;
+  MessageEvent message_event = 12;
+  FileEvent file_event = 13;
+  string app_name = 16;
+  string version = 17;
+  string os = 18;
+  string arch = 19;
+  string tier = 22;
+  int32 unknown_field_24 = 24;
+  string region = 25;
+}
+
+message SessionEvent {
+  string session_id = 1;
+  string conversation_id = 2;
+  int32 turn_number = 3;
+  int32 message_index = 4;
+  Timing timing = 6;
+  string version = 7;
+  string app = 8;
+  string platform = 9;
+}
+
+message MessageEvent {
+  MessageData message_data = 1;
+  TurnInfo turn_info = 2;
+  string session_id = 3;
+  string message_id = 4;
+  int32 status = 5;
+  string error = 6;
+}
+
+message MessageData {
+  int32 type = 1;
+  int32 status = 4;
+  MessageDetails details = 5;
+  UserMessage user_message = 19;
+  EphemeralContent ephemeral_content = 103;
+  ConversationHistory conversation_history = 111;
+  string response = 112;
+}
+
+message EphemeralContent {
+  string message = 1;
+  repeated string tags = 3;
+}
+
+message ConversationHistory {
+  string content = 1;
+}
+
+message MessageDetails {
+  Timestamp start_time = 1;
+  int32 state = 3;
+  Timestamp end_time = 8;
+  string message_id = 12;
+  int32 retry_count = 19;
+  TurnInfo turn_info = 20;
+  repeated StateTransition state_transitions = 26;
+}
+
+message UserMessage {
+  string text = 2;
+  TextContent content = 3;
+  string context = 4;
+  int32 input_type = 8;
+  MessageConfig config = 12;
+}
+
+message TextContent {
+  string text = 1;
+}
+
+message MessageConfig {
+  ConfigDetails details = 1;
+  ConfigFlags flags = 7;
+}
+
+message ConfigDetails {
+  FeatureFlags features = 13;
+  TokenInfo tokens = 15;
+  CapabilityFlags capabilities = 21;
+  ModelFlags model = 32;
+  ModeFlags mode = 2;
+}
+
+message FeatureFlags {
+  FeatureSettings settings = 8;
+  ExperimentFlags experiments = 33;
+}
+
+message FeatureSettings {
+  SettingValue value = 3;
+}
+
+message SettingValue {
+  int32 flag = 6;
+}
+
+message ExperimentFlags {
+  int32 enabled = 1;
+}
+
+message TokenInfo {
+  int32 count = 1;
+}
+
+message CapabilityFlags {
+  int32 enabled = 1;
+}
+
+message ModelFlags {
+  int32 enabled = 1;
+}
+
+message ModeFlags {
+  int32 code_mode = 4;
+  int32 chat_mode = 14;
+}
+
+message ConfigFlags {
+  int32 enabled = 1;
+}
+
+message Timing {
+  Timestamp timestamp = 2;
+  string trace_id = 3;
+}
+
+message Timestamp {
+  int64 seconds = 1;
+  int32 nanos = 2;
+}
+
+message TurnInfo {
+  string session_id = 1;
+  int32 turn_state = 2;
+  int32 turn_number = 3;
+  string conversation_id = 4;
+}
+
+message StateTransition {
+  TransitionInfo info = 1;
+}
+
+message TransitionInfo {
+  int32 state = 1;
+  Timestamp timestamp = 2;
+}
+
+message FileEvent {
+  FileOperation operation = 1;
+}
+
+message FileOperation {
+  Timestamp timestamp = 1;
+  string trace_id = 2;
+  FileDetails details = 4;
+}
+
+message FileDetails {
+  string base_path = 1;
+  string root_path = 2;
+  repeated FileAttachment attachments = 3;
+}
+
+message FileAttachment {
+  string path = 1;
+  bytes content = 2;
+}
+
+message OperationEvent {
+  string event_name = 1;
+  repeated KeyValuePair properties = 2;
+}
+
+message KeyValuePair {
+  string key = 1;
+  string value = 2;
+}
+`;
+
+let telemetryBatchTypeCache = null;
+let telemetryProtoPathCache = null;
+
+function resolveTelemetryProtoPath(explicitProtoPath) {
+  const envProtoPath = process.env.TELEMETRY_PROTO_PATH || process.env.PROTO_TELEMETRY_PATH;
+  const candidates = [
+    explicitProtoPath,
+    envProtoPath,
+    join(getProjectRoot(), 'src', 'utils', 'proto', 'telemetry.proto'),
+    join(process.cwd(), 'src', 'utils', 'proto', 'telemetry.proto'),
+    join(__dirname, 'proto', 'telemetry.proto')
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        return { protoPath: candidate, tried: candidates, hardFail: true };
+      }
+    } catch {
+      // ignore and keep trying
+    }
+  }
+
+  // 如果用户显式指定了路径（参数或环境变量），找不到就直接失败
+  if (explicitProtoPath || envProtoPath) {
+    return { protoPath: null, tried: candidates, hardFail: true };
+  }
+
+  // 否则允许回退到内置的 proto schema（用于二进制/容器环境缺少文件时）
+  return { protoPath: null, tried: candidates, hardFail: false };
+}
+
+function getTelemetryBatchType(protoPath) {
+  const cacheKey = protoPath || '<embedded>';
+  if (telemetryBatchTypeCache && telemetryProtoPathCache === cacheKey) {
+    return telemetryBatchTypeCache;
+  }
+
+  let TelemetryBatch;
+  if (protoPath) {
+    const root = protobuf.loadSync(protoPath);
+    TelemetryBatch = root.lookupType('TelemetryBatch');
+  } else {
+    const parsed = protobuf.parse(TELEMETRY_PROTO_FALLBACK);
+    TelemetryBatch = parsed.root.lookupType('TelemetryBatch');
+  }
+
+  telemetryProtoPathCache = cacheKey;
+  telemetryBatchTypeCache = TelemetryBatch;
+  return TelemetryBatch;
+}
 
 function createTelemetryBatch(num, trajectoryId,conversationId,messageId, sub="free-tier") {
   const now = Date.now();
@@ -354,10 +612,15 @@ function createTelemetryBatch(num, trajectoryId,conversationId,messageId, sub="f
   }
 }
 
-function serializeTelemetryBatch(telemetryData, protoPath = join(__dirname, 'proto', 'telemetry.proto')) {
+function serializeTelemetryBatch(telemetryData, protoPath) {
   try {
-    const root = protobuf.loadSync(protoPath);
-    const TelemetryBatch = root.lookupType('TelemetryBatch');
+    const resolved = resolveTelemetryProtoPath(protoPath);
+    if (resolved.hardFail && !resolved.protoPath) {
+      const tried = resolved.tried?.length ? resolved.tried.join(', ') : '(no candidates)';
+      throw new Error(`telemetry.proto not found; tried: ${tried}`);
+    }
+
+    const TelemetryBatch = getTelemetryBatchType(resolved.protoPath);
 
     const message = TelemetryBatch.create(telemetryData);
     const buffer = TelemetryBatch.encode(message).finish();

@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY dist/antigravity-linux-* /app/antigravity
 COPY dist/public /app/public
 COPY dist/bin /app/bin
+COPY dist/src/utils/proto /app/src/utils/proto
 COPY dist/config.json /app/config.json
 
 # 设置执行权限

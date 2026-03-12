@@ -13,6 +13,7 @@ import { createLog1, createLog2 } from "../utils/additionalLogs.js"
 import { buildClientRegister, buildFrontEnd, buildClientFeatrueHeaders, buildClientRegisterHeaders, buildFrontEndHeaders } from "../utils/unleash.js"
 import { MODEL_LIST_CACHE_TTL, QA_PAIRS } from '../constants/index.js';
 import { createApiError } from '../utils/errors.js';
+import { generateCheckpointBody } from '../utils/checkPoint.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -55,6 +56,7 @@ const unleashControl = {
 const BACKEND_CALL_INTERVAL = unleashControl.callIntervalMs;
 const UNLEASH_FAILURE_BACKOFF = unleashControl.failureBackoffMs;
 const UNLEASH_FAILURE_THRESHOLD = unleashControl.failureThreshold;
+const checkPointList = new Set([]);
 
 function getTokenKey(token) {
   return token.access_token;
@@ -228,10 +230,8 @@ let modelListCacheTime = 0;
 // 使用 Object.freeze 防止意外修改，并帮助 V8 优化
 const DEFAULT_MODELS = Object.freeze([
   'claude-opus-4-6',
-  'claude-opus-4-5',
   'claude-opus-4-6-thinking',
-  'claude-sonnet-4-5-thinking',
-  'claude-sonnet-4-5',
+  'claude-sonnet-4-6',
   'claude-sonnet-4-6-thinking',
   'gemini-3.1-pro-high',
   'gemini-2.5-flash-lite',
@@ -345,6 +345,7 @@ export async function generateAssistantResponse(requestBody, token, callback) {
   const headers = buildHeaders(token);
   const dumpId = isDebugDumpEnabled() ? createDumpId('stream') : null;
   const streamCollector = dumpId ? createStreamCollector() : null;
+  headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody)));
   let num = Math.floor(Math.random() * QA_PAIRS.length);
   if (dumpId) {
     await dumpFinalRequest(dumpId, requestBody);
@@ -388,6 +389,7 @@ export async function generateAssistantResponse(requestBody, token, callback) {
     sendRecordCodeAssistMetrics(token, trajectoryId).catch(err => logger.warn('发送RecordCodeAssistMetrics失败:', err.message));
     sendRecordTrajectoryAnalytics(token, num, trajectoryId,messageId,conversationId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
     sendLog(token,num,trajectoryId,conversationId,messageId).catch(err => logger.warn('发送log失败:', err.message));
+    sendCheckPoint(token).catch(err => logger.warn('发送checkPoint失败:', err.message));;
   } catch (error) {
     try { processor.close(); } catch { }
     await handleApiError(error, token, dumpId);
@@ -508,6 +510,7 @@ export async function generateAssistantResponseNoStream(requestBody, token) {
   const headers = buildHeaders(token);
   const dumpId = isDebugDumpEnabled() ? createDumpId('no_stream') : null;
   let num = Math.floor(Math.random() * QA_PAIRS.length);
+  headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody)));
 
   if (dumpId) await dumpFinalRequest(dumpId, requestBody);
   let data;
@@ -587,6 +590,7 @@ export async function generateImageForSD(requestBody, token) {
   const messageId = randomUUID();
   const modelName = requestBody.model;
   const headers = buildHeaders(token);
+  headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody),'utf-8'));
   let data;
   let num = Math.floor(Math.random() * QA_PAIRS.length);
 
@@ -624,6 +628,7 @@ export async function generateImageForSD(requestBody, token) {
 export async function sendRecordTrajectoryAnalytics(token, num, trajectoryId,executionId,cascadeId, modelName = "claude-opus-4-6-thinking") {
   const trajectorybody = generateTrajectorybody(num, trajectoryId,executionId,cascadeId, modelName, token);
   const headers = buildHeaders(token);
+  headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(trajectorybody)));
   try {
     if (useAxios) {
       await httpRequest({
@@ -662,6 +667,9 @@ export async function sendLog(token, num, trajectoryId, conversationId,messageId
   try {
     for (const log of logs) {
       const serializeData = serializeTelemetryBatch(log);
+      if (!serializeData.success) {
+        throw new Error(`Telemetry proto 序列化失败: ${serializeData.error}`);
+      }
       const serializeLogBody = serializeData.data;
       headers["Content-Length"] = String(serializeLogBody.length);
       
@@ -680,6 +688,7 @@ export async function sendLog(token, num, trajectoryId, conversationId,messageId
 export async function sendRecordCodeAssistMetrics(token, trajectoryId) {
   const requestBody = buildRecordCodeAssistMetricsBody(token, trajectoryId);
   const headers = buildHeaders(token);
+  headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody),'utf-8'));
   try {
     if (useAxios) {
       await httpRequest({
@@ -771,6 +780,35 @@ export async function sendFrontEnd(token) {
     data: requestBody,
     label: 'FrontEnd'
   });
+}
+
+export async function sendCheckPoint(token) {
+  const requestBody = generateCheckpointBody(token);
+  const headers = buildHeaders(token);
+  headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody),'utf-8'));
+  if (checkPointList.has(token.sessionId)){
+    return;
+  }else{
+    checkPointList.add(token.sessionId);
+  }
+  try {
+    if (useAxios) {
+      await httpRequest({
+        method: 'POST',
+        url: config.api.url,
+        headers,
+        data: requestBody
+      });
+    } else {
+      const response = await requester.antigravity_fetch(config.api.url, buildRequesterConfig(headers, requestBody));
+      if (response.status !== 200 && response.status !== 202) {
+        const errorBody = await response.text();
+        throw new Error(`CheckPoint请求失败 (${response.status}): ${errorBody}`);
+      }
+    }
+  } catch (error) {
+    throw error;
+  }
 }
 
 export function closeRequester() {

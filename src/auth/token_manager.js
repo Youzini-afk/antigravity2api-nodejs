@@ -1490,15 +1490,16 @@ class TokenManager {
   /**
    * 根据 token 对象获取 tokenId
    * @param {Object} token - Token 对象
-   * @returns {string|null} tokenId，如果无法生成返回 null
+   * @returns {Promise<string|null>} tokenId，如果无法生成返回 null
    */
-  getTokenId(token) {
+  async getTokenId(token) {
     if (!token?.refresh_token) return null;
     try {
-      const salt = this.store._salt;
+      const salt = await this.store.getSalt();
       if (!salt) return null;
       return generateTokenId(token.refresh_token, salt);
     } catch (error) {
+      log.error(`生成tokenId失败: ${error.message}`);
       return null;
     }
   }

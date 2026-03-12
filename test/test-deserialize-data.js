@@ -7,8 +7,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const protoPath = join(__dirname, '../src/utils/proto/telemetry.proto');
-const dataBinPath = join(__dirname, '../data.bin');
-const outputPath = join(__dirname, '../data-output.json');
+const dataBinPath = join(__dirname, '../data-log2.bin');
+const outputPath = join(__dirname, '../data-output-log2.json');
 
 const root = await protobuf.load(protoPath);
 const TelemetryBatch = root.lookupType('TelemetryBatch');

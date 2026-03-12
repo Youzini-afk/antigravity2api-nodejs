@@ -70,7 +70,7 @@ export const handleClaudeRequest = async (req, res, isStream) => {
     }
 
     // 获取 tokenId 用于冷却状态管理
-    const tokenId = tokenManager.getTokenId(token);
+    const tokenId = await tokenManager.getTokenId(token);
 
     // 创建刷新额度的回调函数
     const refreshQuota = async () => {

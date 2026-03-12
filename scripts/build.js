@@ -91,7 +91,7 @@ console.log('✅ Bundle created: dist/bundle/server.cjs');
 
 // 创建临时 package.json 用于 pkg
 // 使用绝对路径引用资源文件
-const pkgJson = {
+  const pkgJson = {
   name: 'antigravity-to-openai',
   version: '1.0.0',
   bin: 'server.cjs',
@@ -102,7 +102,8 @@ const pkgJson = {
       toSlash(path.join(rootDir, 'public', '*.css')),
       toSlash(path.join(rootDir, 'public', 'js', '*.js')),
       toSlash(path.join(rootDir, 'public', 'assets', '*')),
-      toSlash(path.join(rootDir, 'src', 'bin', '*'))
+      toSlash(path.join(rootDir, 'src', 'bin', '*')),
+      toSlash(path.join(rootDir, 'src', 'utils', 'proto', '*.proto'))
     ]
   }
 };
@@ -275,6 +276,21 @@ try {
   if (fs.existsSync(configSrcPath)) {
     fs.copyFileSync(configSrcPath, configDestPath);
     console.log('  ✓ Copied config.json');
+  }
+  
+  // 复制 proto 文件
+  const protoSrcDir = path.join(rootDir, 'src', 'utils', 'proto');
+  const protoDestDir = path.join(distDir, 'src', 'utils', 'proto');
+  if (fs.existsSync(protoSrcDir)) {
+    fs.mkdirSync(protoDestDir, { recursive: true });
+    const protoFiles = fs.readdirSync(protoSrcDir).filter(f => f.endsWith('.proto'));
+    for (const protoFile of protoFiles) {
+      fs.copyFileSync(
+        path.join(protoSrcDir, protoFile),
+        path.join(protoDestDir, protoFile)
+      );
+      console.log(`  ✓ Copied src/utils/proto/${protoFile}`);
+    }
   }
   
   console.log('');

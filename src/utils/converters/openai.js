@@ -48,7 +48,7 @@ function handleAssistantMessage(message, antigravityMessages, enableThinking, ac
   const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
   const hasContent = message.content && message.content.trim() !== '';
   const { reasoningSignature, reasoningContent, toolSignature, toolContent } = getSignatureContext(sessionId, actualModelName, hasTools);
-
+  
   const toolCalls = hasToolCalls
     ? message.tool_calls.map(toolCall => {
       const safeName = processToolName(toolCall.function.name, sessionId, actualModelName);

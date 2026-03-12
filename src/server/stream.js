@@ -359,33 +359,34 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
           }
 
           // 恢复时间超过阈值，触发模型系列禁用
+          // 优先使用上游返回的动态限流时间（更准确反映当前限流状态）
           let finalResetTimestamp = upstreamResetTimestamp;
 
-          // 尝试从 quotas.json 获取更准确的恢复时间
-          const { resetTime: quotaResetTime, hasData } = quotaManager.getModelGroupResetTime(tokenId, modelId);
+          // 如果上游没有返回时间戳，使用延迟时长计算
+          if (!finalResetTimestamp && explicitDelayMs !== null) {
+            finalResetTimestamp = Date.now() + explicitDelayMs;
+          }
 
-          if (!hasData && typeof refreshQuota === 'function') {
-            // 没有额度数据，尝试刷新
-            logger.info(`${loggerPrefix}正在获取最新额度数据以确定准确恢复时间...`);
+          // 如果上游数据都没有，才尝试从 quotas.json 获取（作为兜底）
+          if (!finalResetTimestamp && typeof refreshQuota === 'function') {
+            logger.info(`${loggerPrefix}上游未返回恢复时间，尝试从额度数据获取...`);
             try {
               await refreshQuota();
-              const refreshed = quotaManager.getModelGroupResetTime(tokenId, modelId);
-              if (refreshed.resetTime) {
-                finalResetTimestamp = refreshed.resetTime;
+              const { resetTime: quotaResetTime } = quotaManager.getModelGroupResetTime(tokenId, modelId);
+              if (quotaResetTime) {
+                finalResetTimestamp = quotaResetTime;
               }
             } catch (e) {
               logger.warn(`${loggerPrefix}获取额度数据失败: ${e.message}`);
             }
-          } else if (quotaResetTime) {
-            // 使用 quotas.json 中的恢复时间（通常更准确）
-            finalResetTimestamp = quotaResetTime;
           }
 
           if (finalResetTimestamp && finalResetTimestamp > Date.now()) {
             const groupKey = getGroupKey(modelId);
             const resetDate = new Date(finalResetTimestamp);
+            const delayMinutes = Math.round((finalResetTimestamp - Date.now()) / 1000 / 60);
           logger.warn(
-            `${loggerPrefix}收到 ${errorType}，恢复时间 ${Math.round(explicitDelayMs / 1000 / 60)} 分钟后，` +
+            `${loggerPrefix}收到 ${errorType}，恢复时间 ${delayMinutes} 分钟后，` +
               `超过阈值(${Math.round(cooldownThreshold / 1000 / 60)}分钟)，` +
               `禁用 ${groupKey} 系列直到 ${resetDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`
             );
