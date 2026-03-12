@@ -77,8 +77,8 @@ function getApiKey() {
  * 支持逗号分隔或换行分隔，自动 trim、去重、忽略空项
  * @returns {string[]}
  */
-function parseBypassThresholdApiKeys() {
-  const raw = process.env.BYPASS_THRESHOLD_API_KEYS;
+function parseEnvKeyList(envKey) {
+  const raw = process.env[envKey];
   if (!raw || typeof raw !== 'string') {
     return [];
   }
@@ -101,6 +101,14 @@ function parseBypassThresholdApiKeys() {
   }
 
   return result;
+}
+
+function parseBypassThresholdApiKeys() {
+  return parseEnvKeyList('BYPASS_THRESHOLD_API_KEYS');
+}
+
+function parseUnrestrictedApiKeys() {
+  return parseEnvKeyList('UNRESTRICTED_API_KEYS');
 }
 
 // 是否已显示过凭据提示
@@ -381,6 +389,19 @@ const DEFAULT_TOKEN_MESSAGES = Object.freeze({
 const DEFAULT_RESET_TIME_OFFSET_MINUTES = 15;
 const TOKEN_MESSAGE_KEYS = Object.keys(DEFAULT_TOKEN_MESSAGES);
 
+const DEFAULT_CLIENT_RESTRICTION = Object.freeze({
+  enabled: false,
+  blockToolCalls: true,
+  toolCallAction: 'strip',
+  uaBlacklist: [],
+  systemPromptBlacklist: [],
+  messages: {
+    uaBlocked: '检测到不支持的客户端，请使用其他客户端',
+    toolCallBlocked: '当前接口不支持工具调用',
+    systemPromptBlocked: '检测到不允许的系统提示词'
+  }
+});
+
 
 function normalizeThresholdPolicy(policy) {
   const base = JSON.parse(JSON.stringify(DEFAULT_THRESHOLD_POLICY));
@@ -538,6 +559,31 @@ function normalizeErrorRewritePolicy(policy) {
  * @returns {Object} 当前 API 配置
  */
 
+function normalizeClientRestriction(input) {
+  const base = JSON.parse(JSON.stringify(DEFAULT_CLIENT_RESTRICTION));
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return base;
+
+  if (typeof input.enabled === 'boolean') base.enabled = input.enabled;
+  if (typeof input.blockToolCalls === 'boolean') base.blockToolCalls = input.blockToolCalls;
+  if (input.toolCallAction === 'strip' || input.toolCallAction === 'reject') {
+    base.toolCallAction = input.toolCallAction;
+  }
+  if (Array.isArray(input.uaBlacklist)) {
+    base.uaBlacklist = input.uaBlacklist.filter(v => typeof v === 'string' && v.trim()).map(v => v.trim().toLowerCase());
+  }
+  if (Array.isArray(input.systemPromptBlacklist)) {
+    base.systemPromptBlacklist = input.systemPromptBlacklist.filter(v => typeof v === 'string' && v.trim()).map(v => v.trim());
+  }
+  if (input.messages && typeof input.messages === 'object') {
+    for (const key of ['uaBlocked', 'toolCallBlocked', 'systemPromptBlocked']) {
+      if (typeof input.messages[key] === 'string' && input.messages[key].trim()) {
+        base.messages[key] = input.messages[key].trim();
+      }
+    }
+  }
+  return base;
+}
+
 function normalizeTokenMessages(input) {
   const base = { ...DEFAULT_TOKEN_MESSAGES, resetTimeOffsetMinutes: DEFAULT_RESET_TIME_OFFSET_MINUTES };
   if (!input || typeof input !== 'object' || Array.isArray(input)) return base;
@@ -641,10 +687,12 @@ export function buildConfig(jsonConfig) {
       max_tokens: jsonConfig.defaults?.maxTokens ?? DEFAULT_GENERATION_PARAMS.max_tokens,
       thinking_budget: jsonConfig.defaults?.thinkingBudget ?? DEFAULT_GENERATION_PARAMS.thinking_budget
     },
+    clientRestriction: normalizeClientRestriction(jsonConfig.clientRestriction),
     security: {
       maxRequestSize: jsonConfig.server?.maxRequestSize || DEFAULT_MAX_REQUEST_SIZE,
       apiKey: getApiKey(),
-      bypassThresholdApiKeys: parseBypassThresholdApiKeys()
+      bypassThresholdApiKeys: parseBypassThresholdApiKeys(),
+      unrestrictedApiKeys: parseUnrestrictedApiKeys()
     },
     unleashControl: {
       enabled: parseBooleanEnv(process.env.UNLEASH_REPORT_ENABLED, true),

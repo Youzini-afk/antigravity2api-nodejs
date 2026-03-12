@@ -9,6 +9,7 @@ const envPath = path.join(__dirname, '../../.env');
 const sensitiveKeys = [
   'API_KEY',
   'BYPASS_THRESHOLD_API_KEYS',
+  'UNRESTRICTED_API_KEYS',
   'ADMIN_USERNAME',
   'ADMIN_PASSWORD',
   'JWT_SECRET',

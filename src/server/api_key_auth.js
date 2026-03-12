@@ -70,12 +70,14 @@ export function resolveApiKeyAuth({
   headers,
   query,
   primaryApiKey,
-  bypassApiKeys
+  bypassApiKeys,
+  unrestrictedApiKeys
 }) {
   const primary = typeof primaryApiKey === 'string' ? primaryApiKey : '';
   const bypassList = normalizeBypassKeyList(bypassApiKeys);
+  const unrestrictedList = normalizeBypassKeyList(unrestrictedApiKeys);
   const candidates = extractApiKeyCandidates(pathname, headers, query);
-  const authRequired = Boolean(primary) || bypassList.length > 0;
+  const authRequired = Boolean(primary) || bypassList.length > 0 || unrestrictedList.length > 0;
 
   let keyType = null;
   // 按候选顺序判定（v1: header 优先, v1beta: query/x-goog-api-key 优先）。
@@ -90,12 +92,17 @@ export function resolveApiKeyAuth({
       keyType = 'bypass';
       break;
     }
+    if (key !== primary && unrestrictedList.includes(key)) {
+      keyType = 'unrestricted';
+      break;
+    }
   }
 
   return {
     authRequired,
     isAuthenticated: !authRequired || keyType !== null,
-    isBypassThreshold: keyType === 'bypass',
+    isBypassThreshold: keyType === 'bypass' || keyType === 'unrestricted',
+    isUnrestricted: keyType === 'unrestricted',
     keyType
   };
 }

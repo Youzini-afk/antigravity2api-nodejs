@@ -408,6 +408,7 @@
                                     <option value="section-rotation">🔄 轮询与性能</option>
                                     <option value="section-error-rewrite">🚨 错误改写</option>
                                     <option value="section-token-messages">💬 凭证消息</option>
+                                    <option value="section-client-restriction">🚫 客户端限制</option>
                                     <option value="section-security">🛡️ 安全管理</option>
                                 </select>
                                 <div class="settings-nav-list">
@@ -421,6 +422,8 @@
                                         onclick="setActiveSettingSection('section-error-rewrite', true)">🚨 错误改写</button>
                                     <button type="button" class="settings-nav-item" data-target="section-token-messages"
                                         onclick="setActiveSettingSection('section-token-messages', true)">💬 凭证消息</button>
+                                    <button type="button" class="settings-nav-item" data-target="section-client-restriction"
+                                        onclick="setActiveSettingSection('section-client-restriction', true)">🚫 客户端限制</button>
                                     <button type="button" class="settings-nav-item" data-target="section-security"
                                         onclick="setActiveSettingSection('section-security', true)">🛡️ 安全管理</button>
                                 </div>
@@ -816,6 +819,63 @@
                                         <div class="form-group compact">
                                             <label>恢复时间偏移 (分钟) <span class="help-tip" data-tooltip="{reset_time} 在实际恢复时间上额外加的分钟数">?</span></label>
                                             <input type="number" id="tokenMsg_resetTimeOffsetMinutes" min="0" placeholder="15">
+                                        </div>
+                                    </div>
+
+                                    <!-- 客户端限制 -->
+                                    <div class="config-section" id="section-client-restriction">
+                                        <h4>🚫 客户端限制</h4>
+                                        <div class="security-info" style="margin-bottom: 0.75rem;">
+                                            <p>阻止代码工具（Cursor、OpenClaw 等）调用 API。白名单 Key 可豁免所有限制。</p>
+                                        </div>
+                                        <div class="form-group compact switch-group">
+                                            <label>启用客户端限制</label>
+                                            <label class="switch">
+                                                <input type="checkbox" id="clientRestrictionEnabled" onchange="handleClientRestrictionChange()">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </div>
+                                        <div id="clientRestrictionFields">
+                                            <div class="form-row-inline switch-row">
+                                                <div class="form-group compact switch-group">
+                                                    <label>禁用工具调用 <span class="help-tip" data-tooltip="检测并处理请求中的 tools/functions 字段">?</span></label>
+                                                    <label class="switch">
+                                                        <input type="checkbox" id="clientRestrictionBlockToolCalls" checked>
+                                                        <span class="slider"></span>
+                                                    </label>
+                                                </div>
+                                                <div class="form-group compact">
+                                                    <label>工具调用处理方式</label>
+                                                    <select id="clientRestrictionToolCallAction">
+                                                        <option value="strip">静默剥离（删除字段继续请求）</option>
+                                                        <option value="reject">直接拒绝（返回错误）</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>UA 黑名单 <span class="help-tip" data-tooltip="每行一个关键词，不区分大小写，匹配 User-Agent 中的关键词">?</span></label>
+                                                <textarea id="clientRestrictionUaBlacklist" rows="3" placeholder="cursor&#10;openclaw&#10;windsurf&#10;cline"></textarea>
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>System Prompt 黑名单 <span class="help-tip" data-tooltip="每行一个关键词，匹配 system 消息中的内容">?</span></label>
+                                                <textarea id="clientRestrictionSysPromptBlacklist" rows="3" placeholder="You are a coding assistant&#10;code completion"></textarea>
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>UA 命中返回消息</label>
+                                                <input type="text" id="clientRestrictionMsgUa" placeholder="检测到不支持的客户端，请使用其他客户端">
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>工具调用拒绝返回消息</label>
+                                                <input type="text" id="clientRestrictionMsgTool" placeholder="当前接口不支持工具调用">
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>System Prompt 命中返回消息</label>
+                                                <input type="text" id="clientRestrictionMsgSysPrompt" placeholder="检测到不允许的系统提示词">
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>白名单 Key <span class="help-tip" data-tooltip="逗号或换行分隔，使用这些 Key 的请求跳过所有客户端限制，同时也跳过阈值过滤">?</span></label>
+                                                <textarea name="UNRESTRICTED_API_KEYS" rows="3" placeholder="sk-unrestricted-1,sk-unrestricted-2 或每行一个"></textarea>
+                                            </div>
                                         </div>
                                     </div>
 

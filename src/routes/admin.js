@@ -314,6 +314,49 @@ function validateTokenMessages(input, fieldPath = "tokenMessages") {
   return null;
 }
 
+function validateClientRestriction(input, fieldPath = "clientRestriction") {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return `${fieldPath} 必须是对象`;
+  }
+
+  const validKeys = ['enabled', 'blockToolCalls', 'toolCallAction', 'uaBlacklist', 'systemPromptBlacklist', 'messages'];
+  for (const key of Object.keys(input)) {
+    if (!validKeys.includes(key)) {
+      return `${fieldPath}.${key} 不是有效的配置项`;
+    }
+  }
+
+  if (input.enabled !== undefined && typeof input.enabled !== 'boolean') {
+    return `${fieldPath}.enabled 必须是布尔值`;
+  }
+  if (input.blockToolCalls !== undefined && typeof input.blockToolCalls !== 'boolean') {
+    return `${fieldPath}.blockToolCalls 必须是布尔值`;
+  }
+  if (input.toolCallAction !== undefined && !['strip', 'reject'].includes(input.toolCallAction)) {
+    return `${fieldPath}.toolCallAction 必须是 'strip' 或 'reject'`;
+  }
+  if (input.uaBlacklist !== undefined) {
+    if (!Array.isArray(input.uaBlacklist)) return `${fieldPath}.uaBlacklist 必须是数组`;
+    if (input.uaBlacklist.some(v => typeof v !== 'string')) return `${fieldPath}.uaBlacklist 元素必须是字符串`;
+  }
+  if (input.systemPromptBlacklist !== undefined) {
+    if (!Array.isArray(input.systemPromptBlacklist)) return `${fieldPath}.systemPromptBlacklist 必须是数组`;
+    if (input.systemPromptBlacklist.some(v => typeof v !== 'string')) return `${fieldPath}.systemPromptBlacklist 元素必须是字符串`;
+  }
+  if (input.messages !== undefined) {
+    if (typeof input.messages !== 'object' || Array.isArray(input.messages)) {
+      return `${fieldPath}.messages 必须是对象`;
+    }
+    const validMsgKeys = ['uaBlocked', 'toolCallBlocked', 'systemPromptBlocked'];
+    for (const key of Object.keys(input.messages)) {
+      if (!validMsgKeys.includes(key)) return `${fieldPath}.messages.${key} 不是有效的消息类型`;
+      if (typeof input.messages[key] !== 'string') return `${fieldPath}.messages.${key} 必须是字符串`;
+    }
+  }
+
+  return null;
+}
+
 // Token管理API - 需要JWT认证（使用 Cookie 优先）
 router.get("/tokens", cookieAuthMiddleware, async (req, res) => {
   try {
@@ -871,6 +914,19 @@ router.put("/config", cookieAuthMiddleware, (req, res) => {
         return res.status(400).json({
           success: false,
           message: tokenMsgErr,
+        });
+      }
+    }
+
+    if (jsonUpdates?.clientRestriction !== undefined) {
+      const crErr = validateClientRestriction(
+        jsonUpdates.clientRestriction,
+        "json.clientRestriction",
+      );
+      if (crErr) {
+        return res.status(400).json({
+          success: false,
+          message: crErr,
         });
       }
     }

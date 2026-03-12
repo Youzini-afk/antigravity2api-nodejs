@@ -416,6 +416,16 @@ function handleThresholdPolicyChange() {
     });
 }
 
+function handleClientRestrictionChange() {
+    const enabled = document.getElementById('clientRestrictionEnabled')?.checked;
+    const container = document.getElementById('clientRestrictionFields');
+    if (!container) return;
+    container.style.opacity = enabled ? '1' : '0.6';
+    container.querySelectorAll('input, select, textarea').forEach(el => {
+        el.disabled = !enabled;
+    });
+}
+
 async function loadRotationStatus() {
     try {
         const response = await authFetch('/admin/rotation');
@@ -512,6 +522,27 @@ async function loadConfig() {
             });
             const offsetEl = document.getElementById('tokenMsg_resetTimeOffsetMinutes');
             if (offsetEl) offsetEl.value = tokenMessages.resetTimeOffsetMinutes ?? 15;
+
+            // 加载客户端限制配置
+            const cr = json.clientRestriction || {};
+            const crEnabled = document.getElementById('clientRestrictionEnabled');
+            if (crEnabled) crEnabled.checked = cr.enabled === true;
+            const crBlockTools = document.getElementById('clientRestrictionBlockToolCalls');
+            if (crBlockTools) crBlockTools.checked = cr.blockToolCalls !== false;
+            const crToolAction = document.getElementById('clientRestrictionToolCallAction');
+            if (crToolAction) crToolAction.value = cr.toolCallAction || 'strip';
+            const crUa = document.getElementById('clientRestrictionUaBlacklist');
+            if (crUa) crUa.value = Array.isArray(cr.uaBlacklist) ? cr.uaBlacklist.join('\n') : '';
+            const crSys = document.getElementById('clientRestrictionSysPromptBlacklist');
+            if (crSys) crSys.value = Array.isArray(cr.systemPromptBlacklist) ? cr.systemPromptBlacklist.join('\n') : '';
+            const crMsgs = cr.messages || {};
+            const crMsgUa = document.getElementById('clientRestrictionMsgUa');
+            if (crMsgUa) crMsgUa.value = crMsgs.uaBlocked || '';
+            const crMsgTool = document.getElementById('clientRestrictionMsgTool');
+            if (crMsgTool) crMsgTool.value = crMsgs.toolCallBlocked || '';
+            const crMsgSys = document.getElementById('clientRestrictionMsgSysPrompt');
+            if (crMsgSys) crMsgSys.value = crMsgs.systemPromptBlocked || '';
+            handleClientRestrictionChange();
 
             // 加载官方系统提示词
             if (form.elements['OFFICIAL_SYSTEM_PROMPT']) {
@@ -662,7 +693,7 @@ async function saveConfig(e) {
     const formData = new FormData(form);
     const allConfig = Object.fromEntries(formData);
 
-    const sensitiveKeys = ['API_KEY', 'BYPASS_THRESHOLD_API_KEYS', 'ADMIN_USERNAME', 'ADMIN_PASSWORD', 'JWT_SECRET', 'PROXY', 'SYSTEM_INSTRUCTION', 'OFFICIAL_SYSTEM_PROMPT', 'IMAGE_BASE_URL'];
+    const sensitiveKeys = ['API_KEY', 'BYPASS_THRESHOLD_API_KEYS', 'UNRESTRICTED_API_KEYS', 'ADMIN_USERNAME', 'ADMIN_PASSWORD', 'JWT_SECRET', 'PROXY', 'SYSTEM_INSTRUCTION', 'OFFICIAL_SYSTEM_PROMPT', 'IMAGE_BASE_URL'];
     const envConfig = {};
     const jsonConfig = {
         server: {},
@@ -688,6 +719,23 @@ async function saveConfig(e) {
     jsonConfig.other.cacheThinking = form.elements['CACHE_THINKING']?.checked ?? true;
     jsonConfig.other.fakeNonStream = form.elements['FAKE_NON_STREAM']?.checked ?? true;
     jsonConfig.errorRewrite = getErrorRewritePolicyPayload();
+
+    // 收集客户端限制配置
+    const clientRestriction = {
+        enabled: document.getElementById('clientRestrictionEnabled')?.checked || false,
+        blockToolCalls: document.getElementById('clientRestrictionBlockToolCalls')?.checked ?? true,
+        toolCallAction: document.getElementById('clientRestrictionToolCallAction')?.value || 'strip',
+        uaBlacklist: (document.getElementById('clientRestrictionUaBlacklist')?.value || '').split('\n').map(s => s.trim()).filter(Boolean),
+        systemPromptBlacklist: (document.getElementById('clientRestrictionSysPromptBlacklist')?.value || '').split('\n').map(s => s.trim()).filter(Boolean),
+        messages: {}
+    };
+    const msgUa = document.getElementById('clientRestrictionMsgUa')?.value?.trim();
+    const msgTool = document.getElementById('clientRestrictionMsgTool')?.value?.trim();
+    const msgSys = document.getElementById('clientRestrictionMsgSysPrompt')?.value?.trim();
+    if (msgUa) clientRestriction.messages.uaBlocked = msgUa;
+    if (msgTool) clientRestriction.messages.toolCallBlocked = msgTool;
+    if (msgSys) clientRestriction.messages.systemPromptBlocked = msgSys;
+    jsonConfig.clientRestriction = clientRestriction;
 
     // 收集凭证消息配置
     const tokenMsgKeys = ['pool_empty', 'all_disabled', 'quota_exhausted', 'model_exhausted', 'threshold_strict', 'no_available'];

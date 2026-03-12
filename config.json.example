@@ -92,5 +92,17 @@
     "threshold_strict": "模型 {model} 所有凭证均低于额度阈值（严格模式）",
     "no_available": "没有可用的凭证",
     "resetTimeOffsetMinutes": 15
+  },
+  "clientRestriction": {
+    "enabled": false,
+    "blockToolCalls": true,
+    "toolCallAction": "strip",
+    "uaBlacklist": [],
+    "systemPromptBlacklist": [],
+    "messages": {
+      "uaBlocked": "检测到不支持的客户端，请使用其他客户端",
+      "toolCallBlocked": "当前接口不支持工具调用",
+      "systemPromptBlocked": "检测到不允许的系统提示词"
+    }
   }
 }

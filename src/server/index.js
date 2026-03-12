@@ -17,6 +17,7 @@ import { errorHandler } from '../utils/errors.js';
 import { getChunkPoolSize, clearChunkPool } from './stream.js';
 import ipBlockManager from '../utils/ipBlockManager.js';
 import { resolveApiKeyAuth } from './api_key_auth.js';
+import { clientRestrictionMiddleware } from './client_restriction.js';
 
 // 路由模块
 import adminRouter from '../routes/admin.js';
@@ -107,7 +108,8 @@ app.use((req, res, next) => {
     headers: req.headers,
     query: req.query,
     primaryApiKey: config.security?.apiKey,
-    bypassApiKeys: config.security?.bypassThresholdApiKeys
+    bypassApiKeys: config.security?.bypassThresholdApiKeys,
+    unrestrictedApiKeys: config.security?.unrestrictedApiKeys
   });
 
   if (authResult.authRequired && !authResult.isAuthenticated) {
@@ -119,11 +121,15 @@ app.use((req, res, next) => {
   req.apiAuthContext = {
     isAuthenticated: authResult.isAuthenticated,
     isBypassThreshold: authResult.isBypassThreshold,
+    isUnrestricted: authResult.isUnrestricted,
     keyType: authResult.keyType || null
   };
 
   next();
 });
+
+// ==================== 客户端限制中间件 ====================
+app.use(clientRestrictionMiddleware);
 
 // ==================== API 路由 ====================
 
