@@ -87,13 +87,13 @@ export function resolveApiKeyAuth({
       keyType = 'primary';
       break;
     }
-    // 同一 key 若既是 primary 又在 bypass 列表中，上面的 primary 分支会优先命中
-    if (key !== primary && bypassList.includes(key)) {
-      keyType = 'bypass';
-      break;
-    }
+    // unrestricted 优先于 bypass（unrestricted 是 bypass 的超集，额外豁免客户端限制）
     if (key !== primary && unrestrictedList.includes(key)) {
       keyType = 'unrestricted';
+      break;
+    }
+    if (key !== primary && bypassList.includes(key)) {
+      keyType = 'bypass';
       break;
     }
   }
