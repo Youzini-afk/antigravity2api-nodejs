@@ -1041,6 +1041,7 @@ class TokenManager {
         }
         return token;
       } catch (error) {
+        if (error.name === 'TokenError') throw error;
         const action = this._handleTokenError(error, token);
         if (action === 'disable') {
           this.disableToken(token);
@@ -1220,6 +1221,7 @@ class TokenManager {
         this.currentQuotaIndex = listIndex;
         return token;
       } catch (error) {
+        if (error.name === 'TokenError') throw error;
         const action = this._handleTokenError(error, token);
         if (action === 'disable') {
           this.disableToken(token);
@@ -1250,7 +1252,8 @@ class TokenManager {
 
     // 所有可用 token 都不可用，重置额度状态
     this._resetAllQuotas();
-    return this.tokens[0] || null;
+    if (!this.tokens[0]) this._throwTokenUnavailable('no_available', modelId);
+    return this.tokens[0];
   }
 
   /**
@@ -1325,6 +1328,7 @@ class TokenManager {
 
         return token;
       } catch (error) {
+        if (error.name === 'TokenError') throw error;
         const action = this._handleTokenError(error, token);
         if (action === 'disable') {
           this.disableToken(token);
@@ -1338,7 +1342,9 @@ class TokenManager {
     if (applyThresholdForStrategy && allBelowThreshold) {
       if (this.thresholdPolicy.allBelowThresholdAction === 'fail_open') {
         log.warn(`阈值策略触发保底放行: 模型 ${modelId} 所有候选凭证均低于阈值，尝试保底选取`);
-        return this._tryGetFallbackToken(fallbackCandidates, this.rotationStrategy);
+        const fbToken = await this._tryGetFallbackToken(fallbackCandidates, this.rotationStrategy);
+        if (fbToken) return fbToken;
+        this._throwTokenUnavailable('threshold_strict', modelId);
       }
       log.warn(`阈值策略严格模式生效: 模型 ${modelId} 所有候选凭证均低于阈值，返回无可用凭证`);
       this._throwTokenUnavailable('threshold_strict', modelId);
