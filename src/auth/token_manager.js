@@ -121,6 +121,7 @@ class TokenManager {
         deviceId: randomUUID(),
         sub: token?.sub ? token?.sub : "g1-pro-tier"
       }));
+      this._totalTokenCount = tokenArray.length;
 
       this.currentIndex = 0;
       this.tokenRequestCounts.clear();
@@ -1140,7 +1141,14 @@ class TokenManager {
 
     async getToken(modelId = null, options = {}) {
     await this._ensureInitialized();
-    if (this.tokens.length === 0) this._throwTokenUnavailable('pool_empty', modelId);
+    if (this.tokens.length === 0) {
+      // 区分"池子真的为空"和"有 token 但全被禁用了"
+      if (this._totalTokenCount > 0) {
+        this._throwTokenUnavailable('all_disabled', modelId);
+      } else {
+        this._throwTokenUnavailable('pool_empty', modelId);
+      }
+    }
 
     // 针对额度耗尽策略做单独的高性能处理
     if (this.rotationStrategy === RotationStrategy.QUOTA_EXHAUSTED) {
