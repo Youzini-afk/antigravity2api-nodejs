@@ -419,6 +419,7 @@ const DEFAULT_REQUEST_INTERCEPTION = Object.freeze({
   testMessage: {
     enabled: true,
     maxLength: 20,
+    keywordsEnabled: false,
     keywords: ['test', '你好', 'hi', 'hello', '测试']
   },
   modelRules: []
@@ -628,6 +629,7 @@ function normalizeRequestInterception(input) {
   // 测试消息配置
   if (input.testMessage && typeof input.testMessage === 'object') {
     if (typeof input.testMessage.enabled === 'boolean') base.testMessage.enabled = input.testMessage.enabled;
+    if (typeof input.testMessage.keywordsEnabled === 'boolean') base.testMessage.keywordsEnabled = input.testMessage.keywordsEnabled;
     if (typeof input.testMessage.maxLength === 'number' && Number.isFinite(input.testMessage.maxLength)) {
       base.testMessage.maxLength = Math.max(1, Math.floor(input.testMessage.maxLength));
     }

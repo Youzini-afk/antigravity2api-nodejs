@@ -56,8 +56,8 @@ function isTestMessage(messages, testConfig) {
     return true;
   }
 
-  // 关键词检测（精确匹配，不用 includes 避免误判）
-  if (Array.isArray(testConfig.keywords) && testConfig.keywords.length > 0) {
+  // 关键词检测（需开启开关，精确匹配）
+  if (testConfig.keywordsEnabled && Array.isArray(testConfig.keywords) && testConfig.keywords.length > 0) {
     const lower = trimmed.toLowerCase();
     for (const keyword of testConfig.keywords) {
       if (lower === keyword) {

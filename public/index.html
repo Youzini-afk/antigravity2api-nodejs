@@ -938,8 +938,15 @@
                                                     <input type="number" id="riTestMaxLength" min="1" value="20">
                                                 </div>
                                             </div>
+                                            <div class="form-group compact switch-group">
+                                                <label>启用关键词匹配</label>
+                                                <label class="switch">
+                                                    <input type="checkbox" id="riTestKeywordsEnabled">
+                                                    <span class="slider"></span>
+                                                </label>
+                                            </div>
                                             <div class="form-group compact">
-                                                <label>关键词列表 <span class="help-tip" data-tooltip="每行一个，不区分大小写，匹配即拦截">?</span></label>
+                                                <label>关键词列表 <span class="help-tip" data-tooltip="每行一个，不区分大小写，精确匹配即拦截">?</span></label>
                                                 <textarea id="riTestKeywords" rows="3" placeholder="test&#10;你好&#10;hi&#10;hello&#10;测试"></textarea>
                                             </div>
 

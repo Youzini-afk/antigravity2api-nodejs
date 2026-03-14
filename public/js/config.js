@@ -655,6 +655,8 @@ async function loadConfig() {
             if (riTestEnabled) riTestEnabled.checked = tm.enabled !== false;
             const riTestLen = document.getElementById('riTestMaxLength');
             if (riTestLen) riTestLen.value = tm.maxLength ?? 20;
+            const riKeywordsEnabled = document.getElementById('riTestKeywordsEnabled');
+            if (riKeywordsEnabled) riKeywordsEnabled.checked = tm.keywordsEnabled === true;
             const riKeywords = document.getElementById('riTestKeywords');
             if (riKeywords) riKeywords.value = Array.isArray(tm.keywords) ? tm.keywords.join('\n') : '';
             renderModelRules(ri.modelRules || []);
@@ -866,6 +868,7 @@ async function saveConfig(e) {
         testMessage: {
             enabled: document.getElementById('riTestMessageEnabled')?.checked ?? true,
             maxLength: parseInt(document.getElementById('riTestMaxLength')?.value) || 20,
+            keywordsEnabled: document.getElementById('riTestKeywordsEnabled')?.checked || false,
             keywords: (document.getElementById('riTestKeywords')?.value || '').split('\n').map(s => s.trim()).filter(Boolean)
         },
         modelRules: collectModelRules()
