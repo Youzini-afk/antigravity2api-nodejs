@@ -32,10 +32,17 @@ function getLastMessageContent(messages, role) {
 
 /**
  * 检测是否为测试/简短消息
+ * 条件：消息数量少（≤3条非system消息）且最后一条user消息很短或匹配关键词
  */
 function isTestMessage(messages, testConfig) {
   if (!testConfig?.enabled) return false;
   if (!Array.isArray(messages) || messages.length === 0) return false;
+
+  // 过滤掉 system 消息，只看实际对话轮次
+  const nonSystemMessages = messages.filter(m => m.role !== 'system');
+
+  // 多轮对话不视为测试（超过3条非system消息说明是正式对话）
+  if (nonSystemMessages.length > 3) return false;
 
   // 只看最后一条 user 消息
   const lastUserMsg = getLastMessageContent(messages, 'user');
@@ -49,11 +56,11 @@ function isTestMessage(messages, testConfig) {
     return true;
   }
 
-  // 关键词检测
+  // 关键词检测（精确匹配，不用 includes 避免误判）
   if (Array.isArray(testConfig.keywords) && testConfig.keywords.length > 0) {
     const lower = trimmed.toLowerCase();
     for (const keyword of testConfig.keywords) {
-      if (lower === keyword || lower.includes(keyword)) {
+      if (lower === keyword) {
         return true;
       }
     }
