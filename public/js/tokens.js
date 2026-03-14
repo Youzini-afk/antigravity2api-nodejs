@@ -169,6 +169,47 @@ async function exportTokens() {
     }
 }
 
+// 导出单个 Token（需要密码验证）
+async function exportSingleToken(tokenId) {
+    const password = await showPasswordPrompt('请输入管理员密码以导出单个 Token');
+    if (!password) return;
+
+    showLoading('正在导出...');
+    try {
+        const response = await authFetch(`/admin/tokens/${encodeURIComponent(tokenId)}/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+
+        const data = await response.json();
+        hideLoading();
+
+        if (data.success) {
+            const blob = new Blob([JSON.stringify(data.data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const email = data.data.tokens?.[0]?.email || tokenId.slice(-8);
+            a.download = `token-${email}-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast('导出成功', 'success');
+        } else {
+            if (response.status === 403) {
+                showToast('密码错误，请重新输入', 'error');
+            } else {
+                showToast(data.message || '导出失败', 'error');
+            }
+        }
+    } catch (error) {
+        hideLoading();
+        showToast('导出失败: ' + error.message, 'error');
+    }
+}
+
 // 导入 Token（需要密码验证）- 打开拖拽上传弹窗
 async function importTokens() {
     showImportUploadModal();
@@ -966,6 +1007,7 @@ function renderTokens(tokens) {
             </div>
             <div class="token-actions">
                 <button class="btn btn-info btn-xs" onclick="showQuotaModal('${safeTokenId}')" title="查看额度">📊 详情</button>
+                <button class="btn btn-secondary btn-xs" onclick="exportSingleToken('${safeTokenId}')" title="导出">📤 导出</button>
                 <button class="btn ${token.enable ? 'btn-warning' : 'btn-success'} btn-xs" onclick="toggleToken('${safeTokenId}', ${!token.enable})" title="${token.enable ? '禁用' : '启用'}">
                     ${token.enable ? '⏸️ 禁用' : '▶️ 启用'}
                 </button>

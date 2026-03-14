@@ -14,6 +14,7 @@ import ipBlockManager from "../utils/ipBlockManager.js";
 import logger from "../utils/logger.js";
 import memoryManager from "../utils/memoryManager.js";
 import { getEnvPath } from "../utils/paths.js";
+import { generateTokenId } from "../utils/idGenerator.js";
 
 const envPath = getEnvPath();
 
@@ -548,6 +549,54 @@ router.post("/tokens/export", cookieAuthMiddleware, async (req, res) => {
     res.json({ success: true, data: exportData });
   } catch (error) {
     logger.error("导出Token失败:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// 单凭证导出
+router.post("/tokens/:id/export", cookieAuthMiddleware, async (req, res) => {
+  const { password } = req.body;
+
+  if (!password || !verifyPassword(password)) {
+    return res.status(403).json({ success: false, message: "密码验证失败" });
+  }
+
+  try {
+    const allTokens = await tokenManager.store.readAll();
+    const salt = await tokenManager.store.getSalt();
+    const targetId = req.params.id;
+
+    const token = allTokens.find(
+      (t) => generateTokenId(t.refresh_token, salt) === targetId,
+    );
+
+    if (!token) {
+      return res.status(404).json({ success: false, message: "Token不存在" });
+    }
+
+    logger.info(`导出单个Token: ${targetId.slice(-8)}`);
+    const exportData = {
+      version: 1,
+      exportTime: new Date().toISOString(),
+      tokens: [
+        {
+          access_token: token.access_token,
+          refresh_token: token.refresh_token,
+          expires_in: token.expires_in,
+          timestamp: token.timestamp,
+          enable: token.enable,
+          projectId: token.projectId,
+          email: token.email,
+          hasQuota: token.hasQuota,
+          useThreshold: token.useThreshold !== false,
+          allowBypassWithSpecialKey: token.allowBypassWithSpecialKey !== false,
+        },
+      ],
+    };
+
+    res.json({ success: true, data: exportData });
+  } catch (error) {
+    logger.error("导出单个Token失败:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
