@@ -422,10 +422,92 @@ function handleClientRestrictionChange() {
     if (!container) return;
     container.style.opacity = enabled ? '1' : '0.6';
     container.querySelectorAll('input, select, textarea').forEach(el => {
-        // 带 name 属性的字段是环境变量，不应被禁用（FormData 不收集 disabled 字段）
         if (el.name) return;
         el.disabled = !enabled;
     });
+}
+
+function handleRequestInterceptionChange() {
+    const enabled = document.getElementById('requestInterceptionEnabled')?.checked;
+    const container = document.getElementById('requestInterceptionFields');
+    if (!container) return;
+    container.style.opacity = enabled ? '1' : '0.6';
+    container.querySelectorAll('input, select, textarea, button').forEach(el => {
+        if (el.name) return;
+        el.disabled = !enabled;
+    });
+}
+
+let modelRuleIndex = 0;
+
+function addModelRule(rule = {}) {
+    const container = document.getElementById('modelRulesContainer');
+    if (!container) return;
+    const idx = modelRuleIndex++;
+    const card = document.createElement('div');
+    card.className = 'model-rule-card';
+    card.style.cssText = 'border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.5rem; background: var(--bg-secondary);';
+    card.id = `modelRule-${idx}`;
+    card.innerHTML = `
+        <div class="form-row-inline" style="margin-bottom: 0.5rem;">
+            <div class="form-group compact" style="flex: 2;">
+                <label>模型匹配 <span class="help-tip" data-tooltip="支持 * 通配符，如 claude-4*">?</span></label>
+                <input type="text" class="rule-pattern" value="${rule.pattern || ''}" placeholder="claude-4*">
+            </div>
+            <div class="form-group compact">
+                <label>最大温度</label>
+                <input type="number" class="rule-maxTemp" step="0.1" min="0" value="${rule.maxTemperature ?? ''}" placeholder="不限">
+            </div>
+            <div class="form-group compact">
+                <label>最大 Token</label>
+                <input type="number" class="rule-maxTokens" min="1" value="${rule.maxTokens ?? ''}" placeholder="不限">
+            </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer; font-size: 0.85rem;">
+                <input type="checkbox" class="rule-noPrefill" ${rule.noPrefill ? 'checked' : ''}> 禁止预填充
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer; font-size: 0.85rem;">
+                <input type="checkbox" class="rule-requireUserLast" ${rule.requireUserLast ? 'checked' : ''}> 必须 user 结尾
+            </label>
+            <button type="button" class="btn btn-danger btn-xs" onclick="removeModelRule(${idx})" style="margin-left: auto;">🗑️ 删除</button>
+        </div>
+    `;
+    container.appendChild(card);
+}
+
+function removeModelRule(idx) {
+    const card = document.getElementById(`modelRule-${idx}`);
+    if (card) card.remove();
+}
+
+function collectModelRules() {
+    const cards = document.querySelectorAll('#modelRulesContainer .model-rule-card');
+    const rules = [];
+    cards.forEach(card => {
+        const pattern = card.querySelector('.rule-pattern')?.value?.trim();
+        if (!pattern) return;
+        const maxTempVal = card.querySelector('.rule-maxTemp')?.value;
+        const maxTokensVal = card.querySelector('.rule-maxTokens')?.value;
+        rules.push({
+            pattern,
+            maxTemperature: maxTempVal !== '' && maxTempVal !== undefined ? parseFloat(maxTempVal) : null,
+            maxTokens: maxTokensVal !== '' && maxTokensVal !== undefined ? parseInt(maxTokensVal) : null,
+            noPrefill: card.querySelector('.rule-noPrefill')?.checked || false,
+            requireUserLast: card.querySelector('.rule-requireUserLast')?.checked || false
+        });
+    });
+    return rules;
+}
+
+function renderModelRules(rules) {
+    const container = document.getElementById('modelRulesContainer');
+    if (!container) return;
+    container.innerHTML = '';
+    modelRuleIndex = 0;
+    if (Array.isArray(rules)) {
+        rules.forEach(r => addModelRule(r));
+    }
 }
 
 async function loadRotationStatus() {
@@ -545,6 +627,31 @@ async function loadConfig() {
             const crMsgSys = document.getElementById('clientRestrictionMsgSysPrompt');
             if (crMsgSys) crMsgSys.value = crMsgs.systemPromptBlocked || '';
             handleClientRestrictionChange();
+
+            // 加载请求拦截配置
+            const ri = json.requestInterception || {};
+            const riEnabled = document.getElementById('requestInterceptionEnabled');
+            if (riEnabled) riEnabled.checked = ri.enabled === true;
+            const ext = ri.external || {};
+            const riBaseUrl = document.getElementById('riExternalBaseUrl');
+            if (riBaseUrl) riBaseUrl.value = ext.baseUrl || '';
+            const riModel = document.getElementById('riExternalModel');
+            if (riModel) riModel.value = ext.model || '';
+            const riSysPrompt = document.getElementById('riExternalSystemPrompt');
+            if (riSysPrompt) riSysPrompt.value = ext.systemPrompt || '';
+            const riTemp = document.getElementById('riExternalTemperature');
+            if (riTemp) riTemp.value = ext.temperature ?? 0.7;
+            const riMaxTok = document.getElementById('riExternalMaxTokens');
+            if (riMaxTok) riMaxTok.value = ext.maxTokens ?? 4096;
+            const tm = ri.testMessage || {};
+            const riTestEnabled = document.getElementById('riTestMessageEnabled');
+            if (riTestEnabled) riTestEnabled.checked = tm.enabled !== false;
+            const riTestLen = document.getElementById('riTestMaxLength');
+            if (riTestLen) riTestLen.value = tm.maxLength ?? 20;
+            const riKeywords = document.getElementById('riTestKeywords');
+            if (riKeywords) riKeywords.value = Array.isArray(tm.keywords) ? tm.keywords.join('\n') : '';
+            renderModelRules(ri.modelRules || []);
+            handleRequestInterceptionChange();
 
             // 加载官方系统提示词
             if (form.elements['OFFICIAL_SYSTEM_PROMPT']) {
@@ -738,6 +845,25 @@ async function saveConfig(e) {
     if (msgTool) clientRestriction.messages.toolCallBlocked = msgTool;
     if (msgSys) clientRestriction.messages.systemPromptBlocked = msgSys;
     jsonConfig.clientRestriction = clientRestriction;
+
+    // 收集请求拦截配置
+    const requestInterception = {
+        enabled: document.getElementById('requestInterceptionEnabled')?.checked || false,
+        external: {
+            baseUrl: document.getElementById('riExternalBaseUrl')?.value?.trim() || '',
+            model: document.getElementById('riExternalModel')?.value?.trim() || '',
+            systemPrompt: document.getElementById('riExternalSystemPrompt')?.value || '',
+            temperature: parseFloat(document.getElementById('riExternalTemperature')?.value) || 0.7,
+            maxTokens: parseInt(document.getElementById('riExternalMaxTokens')?.value) || 4096
+        },
+        testMessage: {
+            enabled: document.getElementById('riTestMessageEnabled')?.checked ?? true,
+            maxLength: parseInt(document.getElementById('riTestMaxLength')?.value) || 20,
+            keywords: (document.getElementById('riTestKeywords')?.value || '').split('\n').map(s => s.trim()).filter(Boolean)
+        },
+        modelRules: collectModelRules()
+    };
+    jsonConfig.requestInterception = requestInterception;
 
     // 收集凭证消息配置
     const tokenMsgKeys = ['pool_empty', 'all_disabled', 'quota_exhausted', 'model_exhausted', 'threshold_strict', 'no_available'];

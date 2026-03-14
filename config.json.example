@@ -104,5 +104,29 @@
       "toolCallBlocked": "当前接口不支持工具调用",
       "systemPromptBlocked": "检测到不允许的系统提示词"
     }
+  },
+  "requestInterception": {
+    "enabled": false,
+    "external": {
+      "baseUrl": "https://api.example.com/v1",
+      "model": "glm-4",
+      "systemPrompt": "",
+      "temperature": 0.7,
+      "maxTokens": 4096
+    },
+    "testMessage": {
+      "enabled": true,
+      "maxLength": 20,
+      "keywords": ["test", "你好", "hi", "hello", "测试"]
+    },
+    "modelRules": [
+      {
+        "pattern": "claude-4*",
+        "maxTemperature": 1.0,
+        "maxTokens": 64000,
+        "noPrefill": true,
+        "requireUserLast": true
+      }
+    ]
   }
 }

@@ -358,6 +358,52 @@ function validateClientRestriction(input, fieldPath = "clientRestriction") {
   return null;
 }
 
+function validateRequestInterception(input, fieldPath = "requestInterception") {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return `${fieldPath} 必须是对象`;
+  }
+
+  if (input.enabled !== undefined && typeof input.enabled !== 'boolean') {
+    return `${fieldPath}.enabled 必须是布尔值`;
+  }
+  if (input.external !== undefined) {
+    if (typeof input.external !== 'object' || Array.isArray(input.external)) {
+      return `${fieldPath}.external 必须是对象`;
+    }
+    if (input.external.baseUrl !== undefined && typeof input.external.baseUrl !== 'string') {
+      return `${fieldPath}.external.baseUrl 必须是字符串`;
+    }
+    if (input.external.model !== undefined && typeof input.external.model !== 'string') {
+      return `${fieldPath}.external.model 必须是字符串`;
+    }
+    if (input.external.temperature !== undefined && (typeof input.external.temperature !== 'number' || !Number.isFinite(input.external.temperature))) {
+      return `${fieldPath}.external.temperature 必须是有效数字`;
+    }
+    if (input.external.maxTokens !== undefined && (typeof input.external.maxTokens !== 'number' || !Number.isFinite(input.external.maxTokens))) {
+      return `${fieldPath}.external.maxTokens 必须是有效数字`;
+    }
+  }
+  if (input.testMessage !== undefined) {
+    if (typeof input.testMessage !== 'object' || Array.isArray(input.testMessage)) {
+      return `${fieldPath}.testMessage 必须是对象`;
+    }
+  }
+  if (input.modelRules !== undefined) {
+    if (!Array.isArray(input.modelRules)) {
+      return `${fieldPath}.modelRules 必须是数组`;
+    }
+    for (let i = 0; i < input.modelRules.length; i++) {
+      const rule = input.modelRules[i];
+      if (!rule || typeof rule !== 'object') return `${fieldPath}.modelRules[${i}] 必须是对象`;
+      if (typeof rule.pattern !== 'string' || !rule.pattern.trim()) {
+        return `${fieldPath}.modelRules[${i}].pattern 必须是非空字符串`;
+      }
+    }
+  }
+
+  return null;
+}
+
 // Token管理API - 需要JWT认证（使用 Cookie 优先）
 router.get("/tokens", cookieAuthMiddleware, async (req, res) => {
   try {
@@ -976,6 +1022,19 @@ router.put("/config", cookieAuthMiddleware, (req, res) => {
         return res.status(400).json({
           success: false,
           message: crErr,
+        });
+      }
+    }
+
+    if (jsonUpdates?.requestInterception !== undefined) {
+      const riErr = validateRequestInterception(
+        jsonUpdates.requestInterception,
+        "json.requestInterception",
+      );
+      if (riErr) {
+        return res.status(400).json({
+          success: false,
+          message: riErr,
         });
       }
     }

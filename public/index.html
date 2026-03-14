@@ -409,6 +409,7 @@
                                     <option value="section-error-rewrite">🚨 错误改写</option>
                                     <option value="section-token-messages">💬 凭证消息</option>
                                     <option value="section-client-restriction">🚫 客户端限制</option>
+                                    <option value="section-request-interception">🔀 请求拦截</option>
                                     <option value="section-security">🛡️ 安全管理</option>
                                 </select>
                                 <div class="settings-nav-list">
@@ -424,6 +425,8 @@
                                         onclick="setActiveSettingSection('section-token-messages', true)">💬 凭证消息</button>
                                     <button type="button" class="settings-nav-item" data-target="section-client-restriction"
                                         onclick="setActiveSettingSection('section-client-restriction', true)">🚫 客户端限制</button>
+                                    <button type="button" class="settings-nav-item" data-target="section-request-interception"
+                                        onclick="setActiveSettingSection('section-request-interception', true)">🔀 请求拦截</button>
                                     <button type="button" class="settings-nav-item" data-target="section-security"
                                         onclick="setActiveSettingSection('section-security', true)">🛡️ 安全管理</button>
                                 </div>
@@ -876,6 +879,76 @@
                                                 <label>白名单 Key <span class="help-tip" data-tooltip="逗号或换行分隔，使用这些 Key 的请求跳过所有客户端限制，同时也跳过阈值过滤">?</span></label>
                                                 <textarea name="UNRESTRICTED_API_KEYS" rows="3" placeholder="sk-unrestricted-1,sk-unrestricted-2 或每行一个"></textarea>
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 请求拦截 -->
+                                    <div class="config-section" id="section-request-interception">
+                                        <h4>🔀 请求拦截</h4>
+                                        <div class="security-info" style="margin-bottom: 0.75rem;">
+                                            <p>拦截测试消息和不合规请求，转发给外部模型回复，避免消耗主凭证额度。</p>
+                                        </div>
+                                        <div class="form-group compact switch-group">
+                                            <label>启用请求拦截</label>
+                                            <label class="switch">
+                                                <input type="checkbox" id="requestInterceptionEnabled" onchange="handleRequestInterceptionChange()">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </div>
+                                        <div id="requestInterceptionFields">
+                                            <h5 style="margin: 1rem 0 0.5rem; color: var(--primary);">🌐 外部模型配置</h5>
+                                            <div class="form-group compact">
+                                                <label>Base URL <span class="help-tip" data-tooltip="OpenAI 兼容 API 地址，如 https://api.deepseek.com/v1">?</span></label>
+                                                <input type="text" id="riExternalBaseUrl" placeholder="https://api.example.com/v1">
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>API Key <span class="help-tip" data-tooltip="存储在 .env 文件中，不会写入 config.json">?</span></label>
+                                                <textarea name="EXTERNAL_API_KEY" rows="1" placeholder="sk-xxx..."></textarea>
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>模型名</label>
+                                                <input type="text" id="riExternalModel" placeholder="glm-4 / deepseek-chat 等">
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>系统提示词 <span class="help-tip" data-tooltip="注入到外部模型请求中的 system prompt">?</span></label>
+                                                <textarea id="riExternalSystemPrompt" rows="3" placeholder="你是一个有帮助的AI助手"></textarea>
+                                            </div>
+                                            <div class="form-row-inline">
+                                                <div class="form-group compact">
+                                                    <label>温度</label>
+                                                    <input type="number" id="riExternalTemperature" step="0.1" min="0" value="0.7">
+                                                </div>
+                                                <div class="form-group compact">
+                                                    <label>最大 Tokens</label>
+                                                    <input type="number" id="riExternalMaxTokens" step="1" min="1" value="4096">
+                                                </div>
+                                            </div>
+
+                                            <h5 style="margin: 1rem 0 0.5rem; color: var(--primary);">💬 测试消息拦截</h5>
+                                            <div class="form-group compact switch-group">
+                                                <label>启用测试消息检测</label>
+                                                <label class="switch">
+                                                    <input type="checkbox" id="riTestMessageEnabled" checked>
+                                                    <span class="slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="form-row-inline">
+                                                <div class="form-group compact">
+                                                    <label>最大长度 <span class="help-tip" data-tooltip="用户消息字符数 ≤ 此值视为测试消息">?</span></label>
+                                                    <input type="number" id="riTestMaxLength" min="1" value="20">
+                                                </div>
+                                            </div>
+                                            <div class="form-group compact">
+                                                <label>关键词列表 <span class="help-tip" data-tooltip="每行一个，不区分大小写，匹配即拦截">?</span></label>
+                                                <textarea id="riTestKeywords" rows="3" placeholder="test&#10;你好&#10;hi&#10;hello&#10;测试"></textarea>
+                                            </div>
+
+                                            <h5 style="margin: 1rem 0 0.5rem; color: var(--primary);">📋 模型参数规则</h5>
+                                            <div class="security-info" style="margin-bottom: 0.5rem;">
+                                                <p>按模型名匹配（支持 * 通配符），自动修正参数或转发外部模型。</p>
+                                            </div>
+                                            <div id="modelRulesContainer"></div>
+                                            <button type="button" class="btn btn-sm btn-info" onclick="addModelRule()" style="margin-top: 0.5rem;">➕ 添加规则</button>
                                         </div>
                                     </div>
 

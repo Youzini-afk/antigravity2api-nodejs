@@ -18,6 +18,7 @@ import { getChunkPoolSize, clearChunkPool } from './stream.js';
 import ipBlockManager from '../utils/ipBlockManager.js';
 import { resolveApiKeyAuth } from './api_key_auth.js';
 import { clientRestrictionMiddleware } from './client_restriction.js';
+import { requestInterceptionMiddleware } from './request_interception.js';
 
 // 路由模块
 import adminRouter from '../routes/admin.js';
@@ -130,6 +131,9 @@ app.use((req, res, next) => {
 
 // ==================== 客户端限制中间件 ====================
 app.use(clientRestrictionMiddleware);
+
+// ==================== 请求拦截中间件 ====================
+app.use(requestInterceptionMiddleware);
 
 // ==================== API 路由 ====================
 

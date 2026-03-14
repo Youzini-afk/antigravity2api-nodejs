@@ -111,6 +111,11 @@ function parseUnrestrictedApiKeys() {
   return parseEnvKeyList('UNRESTRICTED_API_KEYS');
 }
 
+function parseExternalApiKey() {
+  const raw = process.env.EXTERNAL_API_KEY;
+  return (typeof raw === 'string' && raw.trim()) ? raw.trim() : '';
+}
+
 // 是否已显示过凭据提示
 let credentialsDisplayed = false;
 
@@ -402,6 +407,23 @@ const DEFAULT_CLIENT_RESTRICTION = Object.freeze({
   }
 });
 
+const DEFAULT_REQUEST_INTERCEPTION = Object.freeze({
+  enabled: false,
+  external: {
+    baseUrl: '',
+    model: '',
+    systemPrompt: '',
+    temperature: 0.7,
+    maxTokens: 4096
+  },
+  testMessage: {
+    enabled: true,
+    maxLength: 20,
+    keywords: ['test', '你好', 'hi', 'hello', '测试']
+  },
+  modelRules: []
+});
+
 
 function normalizeThresholdPolicy(policy) {
   const base = JSON.parse(JSON.stringify(DEFAULT_THRESHOLD_POLICY));
@@ -584,6 +606,54 @@ function normalizeClientRestriction(input) {
   return base;
 }
 
+function normalizeRequestInterception(input) {
+  const base = JSON.parse(JSON.stringify(DEFAULT_REQUEST_INTERCEPTION));
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return base;
+
+  if (typeof input.enabled === 'boolean') base.enabled = input.enabled;
+
+  // 外部模型配置
+  if (input.external && typeof input.external === 'object') {
+    if (typeof input.external.baseUrl === 'string') base.external.baseUrl = input.external.baseUrl.trim().replace(/\/+$/, '');
+    if (typeof input.external.model === 'string') base.external.model = input.external.model.trim();
+    if (typeof input.external.systemPrompt === 'string') base.external.systemPrompt = input.external.systemPrompt;
+    if (typeof input.external.temperature === 'number' && Number.isFinite(input.external.temperature)) {
+      base.external.temperature = Math.max(0, input.external.temperature);
+    }
+    if (typeof input.external.maxTokens === 'number' && Number.isFinite(input.external.maxTokens)) {
+      base.external.maxTokens = Math.max(1, Math.floor(input.external.maxTokens));
+    }
+  }
+
+  // 测试消息配置
+  if (input.testMessage && typeof input.testMessage === 'object') {
+    if (typeof input.testMessage.enabled === 'boolean') base.testMessage.enabled = input.testMessage.enabled;
+    if (typeof input.testMessage.maxLength === 'number' && Number.isFinite(input.testMessage.maxLength)) {
+      base.testMessage.maxLength = Math.max(1, Math.floor(input.testMessage.maxLength));
+    }
+    if (Array.isArray(input.testMessage.keywords)) {
+      base.testMessage.keywords = input.testMessage.keywords
+        .filter(v => typeof v === 'string' && v.trim())
+        .map(v => v.trim().toLowerCase());
+    }
+  }
+
+  // 模型规则
+  if (Array.isArray(input.modelRules)) {
+    base.modelRules = input.modelRules
+      .filter(r => r && typeof r === 'object' && typeof r.pattern === 'string' && r.pattern.trim())
+      .map(r => ({
+        pattern: r.pattern.trim(),
+        maxTemperature: typeof r.maxTemperature === 'number' && Number.isFinite(r.maxTemperature) ? r.maxTemperature : null,
+        maxTokens: typeof r.maxTokens === 'number' && Number.isFinite(r.maxTokens) ? Math.floor(r.maxTokens) : null,
+        noPrefill: r.noPrefill === true,
+        requireUserLast: r.requireUserLast === true
+      }));
+  }
+
+  return base;
+}
+
 function normalizeTokenMessages(input) {
   const base = { ...DEFAULT_TOKEN_MESSAGES, resetTimeOffsetMinutes: DEFAULT_RESET_TIME_OFFSET_MINUTES };
   if (!input || typeof input !== 'object' || Array.isArray(input)) return base;
@@ -688,6 +758,13 @@ export function buildConfig(jsonConfig) {
       thinking_budget: jsonConfig.defaults?.thinkingBudget ?? DEFAULT_GENERATION_PARAMS.thinking_budget
     },
     clientRestriction: normalizeClientRestriction(jsonConfig.clientRestriction),
+    requestInterception: {
+      ...normalizeRequestInterception(jsonConfig.requestInterception),
+      external: {
+        ...normalizeRequestInterception(jsonConfig.requestInterception).external,
+        apiKey: parseExternalApiKey()
+      }
+    },
     security: {
       maxRequestSize: jsonConfig.server?.maxRequestSize || DEFAULT_MAX_REQUEST_SIZE,
       apiKey: getApiKey(),
