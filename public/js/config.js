@@ -448,31 +448,38 @@ function addModelRule(rule = {}) {
     card.className = 'model-rule-card';
     card.style.cssText = 'border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.5rem; background: var(--bg-secondary);';
     card.id = `modelRule-${idx}`;
+    // 使用 DOM API 设值避免 XSS
     card.innerHTML = `
         <div class="form-row-inline" style="margin-bottom: 0.5rem;">
             <div class="form-group compact" style="flex: 2;">
                 <label>模型匹配 <span class="help-tip" data-tooltip="支持 * 通配符，如 claude-4*">?</span></label>
-                <input type="text" class="rule-pattern" value="${rule.pattern || ''}" placeholder="claude-4*">
+                <input type="text" class="rule-pattern" placeholder="claude-4*">
             </div>
             <div class="form-group compact">
                 <label>最大温度</label>
-                <input type="number" class="rule-maxTemp" step="0.1" min="0" value="${rule.maxTemperature ?? ''}" placeholder="不限">
+                <input type="number" class="rule-maxTemp" step="0.1" min="0" placeholder="不限">
             </div>
             <div class="form-group compact">
                 <label>最大 Token</label>
-                <input type="number" class="rule-maxTokens" min="1" value="${rule.maxTokens ?? ''}" placeholder="不限">
+                <input type="number" class="rule-maxTokens" min="1" placeholder="不限">
             </div>
         </div>
         <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
             <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer; font-size: 0.85rem;">
-                <input type="checkbox" class="rule-noPrefill" ${rule.noPrefill ? 'checked' : ''}> 禁止预填充
+                <input type="checkbox" class="rule-noPrefill"> 禁止预填充
             </label>
             <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer; font-size: 0.85rem;">
-                <input type="checkbox" class="rule-requireUserLast" ${rule.requireUserLast ? 'checked' : ''}> 必须 user 结尾
+                <input type="checkbox" class="rule-requireUserLast"> 必须 user 结尾
             </label>
             <button type="button" class="btn btn-danger btn-xs" onclick="removeModelRule(${idx})" style="margin-left: auto;">🗑️ 删除</button>
         </div>
     `;
+    // 安全地设值（避免 innerHTML 注入）
+    card.querySelector('.rule-pattern').value = rule.pattern || '';
+    if (rule.maxTemperature != null) card.querySelector('.rule-maxTemp').value = rule.maxTemperature;
+    if (rule.maxTokens != null) card.querySelector('.rule-maxTokens').value = rule.maxTokens;
+    if (rule.noPrefill) card.querySelector('.rule-noPrefill').checked = true;
+    if (rule.requireUserLast) card.querySelector('.rule-requireUserLast').checked = true;
     container.appendChild(card);
 }
 

@@ -758,13 +758,11 @@ export function buildConfig(jsonConfig) {
       thinking_budget: jsonConfig.defaults?.thinkingBudget ?? DEFAULT_GENERATION_PARAMS.thinking_budget
     },
     clientRestriction: normalizeClientRestriction(jsonConfig.clientRestriction),
-    requestInterception: {
-      ...normalizeRequestInterception(jsonConfig.requestInterception),
-      external: {
-        ...normalizeRequestInterception(jsonConfig.requestInterception).external,
-        apiKey: parseExternalApiKey()
-      }
-    },
+    requestInterception: (() => {
+      const ri = normalizeRequestInterception(jsonConfig.requestInterception);
+      ri.external.apiKey = parseExternalApiKey();
+      return ri;
+    })(),
     security: {
       maxRequestSize: jsonConfig.server?.maxRequestSize || DEFAULT_MAX_REQUEST_SIZE,
       apiKey: getApiKey(),
