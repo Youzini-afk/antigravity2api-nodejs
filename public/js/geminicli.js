@@ -266,6 +266,7 @@ function renderGeminiCliTokens(tokens) {
                     ${token.enable ? '⏸️ 禁用' : '▶️ 启用'}
                 </button>
                 <button class="btn btn-danger btn-xs" onclick="deleteGeminiCliToken('${safeTokenId}')" title="删除">🗑️ 删除</button>
+                <button class="btn btn-info btn-xs" onclick="exportSingleGeminiCliToken('${safeTokenId}')" title="导出凭证">📋 导出</button>
             </div>
         </div>
     `}).join('');
@@ -484,6 +485,49 @@ async function deleteGeminiCliToken(tokenId) {
     } catch (error) {
         hideLoading();
         showToast('删除失败: ' + error.message, 'error');
+    }
+}
+
+// 导出单个 Gemini CLI Token
+async function exportSingleGeminiCliToken(tokenId) {
+    const password = await showPasswordPrompt('请输入管理员密码以导出该凭证');
+    if (!password) return;
+
+    try {
+        const response = await authFetch(`/admin/geminicli/tokens/${encodeURIComponent(tokenId)}/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            const json = JSON.stringify(result.data, null, 2);
+            try {
+                await navigator.clipboard.writeText(json);
+                showToast('凭证已复制到剪贴板', 'success');
+            } catch {
+                // 剪贴板失败时下载文件
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `geminicli-token-${tokenId.substring(0, 8)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('凭证已下载', 'success');
+            }
+        } else {
+            if (response.status === 403) {
+                showToast('密码错误', 'error');
+            } else {
+                showToast(result.message || '导出失败', 'error');
+            }
+        }
+    } catch (error) {
+        showToast('导出失败: ' + error.message, 'error');
     }
 }
 

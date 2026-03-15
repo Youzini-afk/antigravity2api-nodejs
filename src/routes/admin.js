@@ -1514,6 +1514,45 @@ router.post(
   },
 );
 
+// 导出单个 Gemini CLI Token（需要密码验证）
+router.post(
+  "/geminicli/tokens/:tokenId/export",
+  cookieAuthMiddleware,
+  async (req, res) => {
+    const { tokenId } = req.params;
+    const { password } = req.body;
+
+    if (!password || !verifyPassword(password)) {
+      return res.status(403).json({ success: false, message: "密码验证失败" });
+    }
+
+    try {
+      const token = await geminicliTokenManager.findTokenById(tokenId);
+
+      if (!token) {
+        return res.status(404).json({ success: false, message: "Token不存在" });
+      }
+
+      logger.info(`[GeminiCLI] 导出单个Token: ${tokenId}`);
+      res.json({
+        success: true,
+        data: {
+          access_token: token.access_token,
+          refresh_token: token.refresh_token,
+          expires_in: token.expires_in,
+          timestamp: token.timestamp,
+          enable: token.enable,
+          email: token.email,
+          projectId: token.projectId,
+        },
+      });
+    } catch (error) {
+      logger.error("[GeminiCLI] 导出单个Token失败:", error.message);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+);
+
 // 导出 Gemini CLI Token（需要密码验证）
 router.post(
   "/geminicli/tokens/export",
