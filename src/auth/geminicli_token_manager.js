@@ -751,6 +751,14 @@ class GeminiCliTokenManager {
 
     const data = response.data || {};
     const quotas = {};
+    const modelKeys = Object.keys(data.models || {});
+    const modelsWithQuota = modelKeys.filter(k => data.models[k]?.quotaInfo);
+    log.info(`[GeminiCLI] _fetchModelsWithQuotas: response keys=${JSON.stringify(Object.keys(data))}, totalModels=${modelKeys.length}, withQuotaInfo=${modelsWithQuota.length}`);
+    if (modelKeys.length > 0 && modelsWithQuota.length === 0) {
+      // Log first model's structure for debugging
+      const firstKey = modelKeys[0];
+      log.info(`[GeminiCLI] First model sample: key=${firstKey}, data=${JSON.stringify(data.models[firstKey]).substring(0, 200)}`);
+    }
     Object.entries(data.models || {}).forEach(([modelId, modelData]) => {
       if (modelData?.quotaInfo) {
         quotas[modelId] = {
