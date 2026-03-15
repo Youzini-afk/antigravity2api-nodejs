@@ -1300,15 +1300,45 @@ class GeminiCliTokenManager {
       const allTokens = await this.store.readAll();
       const salt = await this.store.getSalt();
 
-      return allTokens.map(token => ({
-        ...normalizeTokenThresholdControl(token),
-        id: generateTokenId(token.refresh_token, salt),
-        expires_in: token.expires_in,
-        timestamp: token.timestamp,
-        enable: token.enable !== false,
-        email: token.email || null,
-        projectId: token.projectId || null
-      }));
+      return allTokens.map(token => {
+        const tokenId = generateTokenId(token.refresh_token, salt);
+        const quotaData = quotaManager.getQuotaAnyAge(tokenId);
+
+        // 构造额度摘要：按模型组聚合
+        let quotaSummary = null;
+        if (quotaData && quotaData.models) {
+          const groups = {};
+          for (const [modelId, mQuota] of Object.entries(quotaData.models)) {
+            const group = getGroupKey(modelId);
+            if (!groups[group]) {
+              groups[group] = { remaining: mQuota.r ?? 1, resetTime: mQuota.t || null };
+            } else {
+              if ((mQuota.r ?? 1) < groups[group].remaining) {
+                groups[group].remaining = mQuota.r ?? 1;
+              }
+              if (mQuota.t && (!groups[group].resetTime || mQuota.t < groups[group].resetTime)) {
+                groups[group].resetTime = mQuota.t;
+              }
+            }
+          }
+          quotaSummary = {
+            groups,
+            lastUpdated: quotaData.lastUpdated || null,
+            requestCounts: quotaData.requestCounts || {}
+          };
+        }
+
+        return {
+          ...normalizeTokenThresholdControl(token),
+          id: tokenId,
+          expires_in: token.expires_in,
+          timestamp: token.timestamp,
+          enable: token.enable !== false,
+          email: token.email || null,
+          projectId: token.projectId || null,
+          quota: quotaSummary
+        };
+      });
     } catch (error) {
       log.error('[GeminiCLI] 获取Token列表失败:', error.message);
       return [];

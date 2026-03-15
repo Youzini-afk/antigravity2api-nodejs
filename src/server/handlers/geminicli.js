@@ -62,9 +62,6 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
     const { geminiRequest, model: actualModel, features, sourceFormat } = convertToGeminiCli(cleanedBody);
     const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
     const token = await getToken(actualModel, { bypassThreshold });
-    if (!token) {
-      throw new Error('没有可用的 Gemini CLI token，请在管理页面添加账号');
-    }
     const tokenId = geminicliTokenManager.getTokenId(token);
     const refreshQuota = async () => {
       if (!tokenId) return;
