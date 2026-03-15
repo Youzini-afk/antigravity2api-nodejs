@@ -146,6 +146,47 @@ async function loadGeminiCliTokens() {
     }
 }
 
+// 渲染 Gemini CLI Token 额度条
+function renderGeminiCliQuota(quota) {
+    if (!quota || !quota.groups) return '';
+
+    const groupLabels = {
+        gemini: '💎 Gemini',
+        claude: '🤖 Claude',
+        banana: '🍌 图片',
+        other: '📦 其他'
+    };
+
+    const bars = Object.entries(quota.groups).map(([group, data]) => {
+        const pct = Math.round((data.remaining ?? 1) * 100);
+        const color = pct > 60 ? '#22c55e' : pct > 20 ? '#f59e0b' : '#ef4444';
+        const label = groupLabels[group] || group;
+        const resetTitle = data.resetTime ? `预计恢复: ${new Date(data.resetTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}` : '';
+        return `
+            <div style="display:flex;align-items:center;gap:6px;margin:2px 0;" title="${resetTitle}">
+                <span style="font-size:0.7rem;min-width:68px;white-space:nowrap;">${label}</span>
+                <div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
+                    <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width 0.3s;"></div>
+                </div>
+                <span style="font-size:0.65rem;min-width:30px;text-align:right;opacity:0.8;">${pct}%</span>
+            </div>`;
+    }).join('');
+
+    if (!bars) return '';
+
+    const age = quota.lastUpdated ? Math.round((Date.now() - quota.lastUpdated) / 60000) : null;
+    const ageText = age !== null ? `${age}分钟前` : '';
+
+    return `
+        <div style="padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+                <span style="font-size:0.7rem;opacity:0.6;">📊 额度</span>
+                <span style="font-size:0.6rem;opacity:0.4;">${ageText}</span>
+            </div>
+            ${bars}
+        </div>`;
+}
+
 // 渲染 Gemini CLI Token 列表
 function renderGeminiCliTokens(tokens) {
     cachedGeminiCliTokens = tokens;
@@ -213,6 +254,7 @@ function renderGeminiCliTokens(tokens) {
                     <span class="info-value ${hasProjectId ? '' : 'text-warning'}">${safeProjectId || '未获取'}</span>
                     ${!hasProjectId ? `<button class="btn btn-info btn-xs" onclick="fetchGeminiCliProjectId('${safeTokenId}')" style="margin-left: auto;">获取</button>` : ''}
                 </div>
+                ${renderGeminiCliQuota(token.quota)}
             </div>
             <div class="token-id-row" title="Token ID: ${escapeHtml(tokenId)}">
                 <span class="token-id-label">🔑</span>

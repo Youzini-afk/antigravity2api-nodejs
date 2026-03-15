@@ -14,6 +14,7 @@ import { TokenError } from '../utils/errors.js';
 import { getDataDir } from '../utils/paths.js';
 import quotaManager from './quota_manager.js';
 import tokenCooldownManager from './token_cooldown_manager.js';
+import { getGroupKey } from '../utils/modelGroups.js';
 
 // Gemini CLI API 配置
 const GEMINICLI_API_CONFIG = {
