@@ -78,6 +78,11 @@ export async function requestInterceptionMiddleware(req, res, next) {
     return next();
   }
 
+  // 特殊 key 绕过请求拦截（与客户端限制/阈值的 unrestricted key 一致）
+  if (req.apiAuthContext?.isUnrestricted === true) {
+    return next();
+  }
+
   const body = req.body;
   if (!body || typeof body !== 'object') {
     return next();
