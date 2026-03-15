@@ -1504,8 +1504,13 @@ router.post(
     const { tokenId } = req.params;
     try {
       const result = await geminicliTokenManager.refreshQuotaById(tokenId);
-      logger.info(`[GeminiCLI] 手动刷新额度: ${tokenId} -> ${result}`);
-      res.json({ success: true, message: "额度刷新成功" });
+      if (result) {
+        logger.info(`[GeminiCLI] 手动刷新额度成功: ${tokenId}`);
+        res.json({ success: true, message: "额度刷新成功" });
+      } else {
+        logger.warn(`[GeminiCLI] 手动刷新额度失败: ${tokenId}`);
+        res.json({ success: false, message: "额度获取失败，可能被限流(429)，请稍后重试" });
+      }
     } catch (error) {
       logger.error("[GeminiCLI] 刷新额度失败:", error.message);
       const status = error.statusCode || 500;

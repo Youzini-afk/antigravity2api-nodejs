@@ -751,14 +751,6 @@ class GeminiCliTokenManager {
 
     const data = response.data || {};
     const quotas = {};
-    const modelKeys = Object.keys(data.models || {});
-    const modelsWithQuota = modelKeys.filter(k => data.models[k]?.quotaInfo);
-    log.info(`[GeminiCLI] _fetchModelsWithQuotas: response keys=${JSON.stringify(Object.keys(data))}, totalModels=${modelKeys.length}, withQuotaInfo=${modelsWithQuota.length}`);
-    if (modelKeys.length > 0 && modelsWithQuota.length === 0) {
-      // Log first model's structure for debugging
-      const firstKey = modelKeys[0];
-      log.info(`[GeminiCLI] First model sample: key=${firstKey}, data=${JSON.stringify(data.models[firstKey]).substring(0, 200)}`);
-    }
     Object.entries(data.models || {}).forEach(([modelId, modelData]) => {
       if (modelData?.quotaInfo) {
         quotas[modelId] = {
@@ -1328,7 +1320,6 @@ class GeminiCliTokenManager {
       return allTokens.map(token => {
         const tokenId = generateTokenId(token.refresh_token, salt);
         const quotaData = quotaManager.getQuotaAnyAge(tokenId);
-        log.info(`[GeminiCLI] getTokenList quota for ${tokenId}: ${quotaData ? JSON.stringify(Object.keys(quotaData)) : 'null'}, models: ${quotaData?.models ? Object.keys(quotaData.models).length : 0}`);
 
         // 构造额度摘要：按模型组聚合
         let quotaSummary = null;
