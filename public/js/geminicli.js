@@ -238,6 +238,7 @@ function renderGeminiCliTokens(tokens) {
                         ${token.enable ? '✅ 启用' : '❌ 禁用'}
                     </span>
                     <button class="btn-icon token-refresh-btn" onclick="refreshGeminiCliToken('${safeTokenId}')" title="刷新Token">🔄</button>
+                    <button class="btn-icon token-refresh-btn" onclick="refreshGeminiCliQuota('${safeTokenId}')" title="刷新额度">📊</button>
                 </div>
                 <div class="token-header-right">
                     <span class="token-id">#${tokenNumber}</span>
@@ -301,6 +302,27 @@ async function refreshGeminiCliToken(tokenId) {
         const data = await response.json();
         if (data.success) {
             showToast('Token 刷新成功', 'success');
+            loadGeminiCliTokens();
+        } else {
+            showToast(`刷新失败: ${data.message || '未知错误'}`, 'error');
+        }
+    } catch (error) {
+        if (error.message !== 'Unauthorized') {
+            showToast(`刷新失败: ${error.message}`, 'error');
+        }
+    }
+}
+
+// 刷新 Gemini CLI Token 额度
+async function refreshGeminiCliQuota(tokenId) {
+    try {
+        showToast('正在获取额度...', 'info');
+        const response = await authFetch(`/admin/geminicli/tokens/${encodeURIComponent(tokenId)}/refresh-quota`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast('额度刷新成功', 'success');
             loadGeminiCliTokens();
         } else {
             showToast(`刷新失败: ${data.message || '未知错误'}`, 'error');

@@ -800,6 +800,23 @@ class GeminiCliTokenManager {
     return this._refreshQuotaSync(token, tokenId);
   }
 
+  /**
+   * 根据 tokenId 手动刷新额度
+   * @param {string} tokenId - 安全的 token ID
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async refreshQuotaById(tokenId) {
+    await this._ensureInitialized();
+    const token = await this.findTokenById(tokenId);
+    if (!token) {
+      throw new TokenError('Token不存在', null, 404);
+    }
+    if (this.isExpired(token)) {
+      await this.refreshToken(token, true);
+    }
+    return this._refreshQuotaSync(token, tokenId);
+  }
+
   async _ensureQuotaForThreshold(token, tokenId) {
     if (!tokenId) return;
     const fresh = quotaManager.getQuota(tokenId);

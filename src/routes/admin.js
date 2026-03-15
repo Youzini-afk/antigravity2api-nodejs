@@ -1496,6 +1496,24 @@ router.post(
   },
 );
 
+// 手动刷新指定 Gemini CLI Token 的额度
+router.post(
+  "/geminicli/tokens/:tokenId/refresh-quota",
+  cookieAuthMiddleware,
+  async (req, res) => {
+    const { tokenId } = req.params;
+    try {
+      const result = await geminicliTokenManager.refreshQuotaById(tokenId);
+      logger.info(`[GeminiCLI] 手动刷新额度: ${tokenId} -> ${result}`);
+      res.json({ success: true, message: "额度刷新成功" });
+    } catch (error) {
+      logger.error("[GeminiCLI] 刷新额度失败:", error.message);
+      const status = error.statusCode || 500;
+      res.status(status).json({ success: false, message: error.message });
+    }
+  },
+);
+
 // 导出 Gemini CLI Token（需要密码验证）
 router.post(
   "/geminicli/tokens/export",
