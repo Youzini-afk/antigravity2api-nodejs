@@ -1320,6 +1320,7 @@ class GeminiCliTokenManager {
       return allTokens.map(token => {
         const tokenId = generateTokenId(token.refresh_token, salt);
         const quotaData = quotaManager.getQuotaAnyAge(tokenId);
+        log.info(`[GeminiCLI] getTokenList quota for ${tokenId}: ${quotaData ? JSON.stringify(Object.keys(quotaData)) : 'null'}, models: ${quotaData?.models ? Object.keys(quotaData.models).length : 0}`);
 
         // 构造额度摘要：按模型组聚合
         let quotaSummary = null;
