@@ -343,10 +343,9 @@ class TokenManager {
       log.warn(`[fetchProjectId] onboardUser 失败: ${err.message}`);
     }
 
-    // 步骤3: 自动生成随机 projectId（学习 gcli2api 的做法）
-    const randomId = generateProjectId();
-    log.warn(`[fetchProjectId] 所有方法均失败，自动生成随机 projectId: ${randomId}`);
-    return { projectId: randomId, sub: "free-tier" };
+    // 所有方法均失败，返回 null 让调用者处理
+    log.warn('[fetchProjectId] loadCodeAssist 和 onboardUser 均未能获取 projectId');
+    return null;
   }
 
   /**
