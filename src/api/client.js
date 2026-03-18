@@ -460,15 +460,6 @@ export async function getAvailableModels() {
     owned_by: 'google'
   }));
 
-  // 添加流式抗截断前缀版本（学习 gcli2api）
-  const antiTruncModels = modelList.filter(m => !m.id.startsWith('流式抗截断/')).map(m => ({
-    id: `流式抗截断/${m.id}`,
-    object: 'model',
-    created,
-    owned_by: 'google'
-  }));
-  modelList.push(...antiTruncModels);
-
   // 添加默认模型（如果 API 返回的列表中没有）
   const existingIds = new Set(modelList.map(m => m.id));
   for (const defaultModel of DEFAULT_MODELS) {
@@ -481,6 +472,15 @@ export async function getAvailableModels() {
       });
     }
   }
+
+  // 添加流式抗截断前缀版本（学习 gcli2api）— 放在默认模型之后，确保所有模型都有前缀版本
+  const antiTruncModels = modelList.filter(m => !m.id.startsWith('流式抗截断/')).map(m => ({
+    id: `流式抗截断/${m.id}`,
+    object: 'model',
+    created,
+    owned_by: 'google'
+  }));
+  modelList.push(...antiTruncModels);
 
   const result = {
     object: 'list',
