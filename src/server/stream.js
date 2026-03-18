@@ -8,6 +8,7 @@ import logger from '../utils/logger.js';
 import memoryManager, { registerMemoryPoolCleanup } from '../utils/memoryManager.js';
 import { DEFAULT_HEARTBEAT_INTERVAL, LONG_COOLDOWN_THRESHOLD } from '../constants/index.js';
 import tokenCooldownManager from '../auth/token_cooldown_manager.js';
+import tokenManager from '../auth/token_manager.js';
 import quotaManager from '../auth/quota_manager.js';
 import { getGroupKey } from '../utils/modelGroups.js';
 
@@ -404,6 +405,11 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
             `${loggerPrefix}收到 ${errorType}，等待 ${waitMs}ms 后进行第 ${nextAttempt} 次重试（共 ${retries} 次）` +
             (explicitDelayMs !== null ? `（上游提示≈${explicitDelayMs}ms）` : '')
           );
+          // 凭证预热：在等待期间异步预备下一个凭证（学习 gcli2api）
+          // 当 sleep 结束后，新凭证很可能已准备好，减少切换等待
+          if (modelId) {
+            tokenManager.prewarmNextToken(modelId).catch(() => {});
+          }
           await sleep(waitMs);
           attempt = nextAttempt;
           continue;

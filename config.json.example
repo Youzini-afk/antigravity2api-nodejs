@@ -47,6 +47,7 @@
       "recordTrajectory": "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordTrajectoryAnalytics",
       "recordCodeAssistMetrics": "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordCodeAssistMetrics"
     },
+    "projectIdHost": "daily-cloudcode-pa.sandbox.googleapis.com",
     "production": {
       "url": "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
       "modelsUrl": "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",

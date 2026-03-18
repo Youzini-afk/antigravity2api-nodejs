@@ -338,12 +338,15 @@ class TokenManager {
     try {
       const {projectId,sub} = await this._tryOnboardUser(token) || {};
       if (projectId) return {projectId, sub};
-      log.error('[fetchProjectId] loadCodeAssist 和 onboardUser 均未能获取 projectId');
-      return {projectId: undefined, sub: "free-tier"};
+      log.warn('[fetchProjectId] loadCodeAssist 和 onboardUser 均未能获取 projectId');
     } catch (err) {
-      log.error(`[fetchProjectId] onboardUser 失败: ${err.message}`);
-      return {projectId: undefined, sub: "free-tier"};
+      log.warn(`[fetchProjectId] onboardUser 失败: ${err.message}`);
     }
+
+    // 步骤3: 自动生成随机 projectId（学习 gcli2api 的做法）
+    const randomId = generateProjectId();
+    log.warn(`[fetchProjectId] 所有方法均失败，自动生成随机 projectId: ${randomId}`);
+    return { projectId: randomId, sub: "free-tier" };
   }
 
   /**
@@ -353,7 +356,7 @@ class TokenManager {
    * @private
    */
   async _tryLoadCodeAssist(token) {
-    const apiHost = config.api.host;
+    const apiHost = config.projectIdApiHost || config.api.host;
     const requestUrl = `https://${apiHost}/v1internal:loadCodeAssist`;
     const requestBody = {
       metadata: {
@@ -369,7 +372,7 @@ class TokenManager {
       url: requestUrl,
       headers: {
         'Host': apiHost,
-        'User-Agent': config.api.userAgent,
+        'User-Agent': config.projectIdUserAgent || config.api.userAgent,
         'Authorization': `Bearer ${token.access_token}`,
         'Content-Type': 'application/json',
         'Accept-Encoding': 'gzip'
@@ -405,7 +408,7 @@ class TokenManager {
    * @private
    */
   async _tryOnboardUser(token) {
-    const apiHost = config.api.host;
+    const apiHost = config.projectIdApiHost || config.api.host;
     const requestUrl = `https://${apiHost}/v1internal:onboardUser`;
 
     // 首先获取用户的 tier 信息
@@ -438,7 +441,7 @@ class TokenManager {
         url: requestUrl,
         headers: {
           'Host': apiHost,
-          'User-Agent': config.api.userAgent,
+          'User-Agent': config.projectIdUserAgent || config.api.userAgent,
           'Authorization': `Bearer ${token.access_token}`,
           'Content-Type': 'application/json',
           'Accept-Encoding': 'gzip'
@@ -487,7 +490,7 @@ class TokenManager {
    * @private
    */
   async _getOnboardTier(token) {
-    const apiHost = config.api.host;
+    const apiHost = config.projectIdApiHost || config.api.host;
     const requestUrl = `https://${apiHost}/v1internal:loadCodeAssist`;
     const requestBody = {
       metadata: {
@@ -505,7 +508,7 @@ class TokenManager {
         url: requestUrl,
         headers: {
           'Host': apiHost,
-          'User-Agent': config.api.userAgent,
+          'User-Agent': config.projectIdUserAgent || config.api.userAgent,
           'Authorization': `Bearer ${token.access_token}`,
           'Content-Type': 'application/json',
           'Accept-Encoding': 'gzip'
@@ -532,6 +535,39 @@ class TokenManager {
     } catch (err) {
       log.error(`[_getOnboardTier] 获取 tier 失败: ${err.message}`);
       return null;
+    }
+  }
+
+  /**
+   * 获取 projectId 后自动启用必要的 Google Cloud API 服务（学习 gcli2api）
+   * @param {Object} token - Token 对象
+   * @param {string} projectId - 项目 ID
+   * @private
+   */
+  async _enableRequiredApis(token, projectId) {
+    const requiredServices = [
+      'geminicloudassist.googleapis.com',
+      'cloudaicompanion.googleapis.com',
+    ];
+
+    for (const service of requiredServices) {
+      try {
+        const url = `https://serviceusage.googleapis.com/v1/projects/${projectId}/services/${service}:enable`;
+        await axios(buildAxiosRequestConfig({
+          method: 'POST',
+          url,
+          headers: {
+            'Authorization': `Bearer ${token.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          data: '{}',
+          timeout: 15000
+        }));
+        log.info(`[enableApis] 已启用服务: ${service}`);
+      } catch (err) {
+        // 服务已启用或无权限启用时不影响主流程
+        log.debug(`[enableApis] 启用服务 ${service} 失败(可能已启用): ${err.message}`);
+      }
     }
   }
 
@@ -732,6 +768,10 @@ class TokenManager {
         token.projectId = projectId;
         token.sub = sub;
         this.saveToFile(token);
+        // 自动启用必要的 API 服务（学习 gcli2api，不阻塞主流程）
+        this._enableRequiredApis(token, projectId).catch(err => {
+          log.debug(`[_prepareToken] 启用 API 服务失败(不影响使用): ${err.message}`);
+        });
       }
     }
 
@@ -1607,6 +1647,22 @@ class TokenManager {
       currentIndex: this.currentIndex,
       tokenCounts: Object.fromEntries(this.tokenRequestCounts)
     };
+  }
+
+  /**
+   * 凭证预热：异步预准备下一个可用凭证（学习 gcli2api 的做法）
+   * 在重试等待期间调用，使得重试时凭证已准备好，减少等待时间
+   * @param {string} modelName - 模型名称
+   */
+  async prewarmNextToken(modelName) {
+    try {
+      const nextToken = await this.getToken(modelName, { silent: true });
+      if (nextToken) {
+        log.debug(`[prewarm] 预热凭证完成: ...${nextToken.access_token?.slice(-8)}`);
+      }
+    } catch (err) {
+      log.debug(`[prewarm] 预热凭证失败(不影响主流程): ${err.message}`);
+    }
   }
 }
 

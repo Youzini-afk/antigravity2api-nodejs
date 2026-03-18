@@ -3,6 +3,7 @@
  * 处理 /cli/v1/chat/completions 请求，支持流式和非流式响应
  */
 
+import { isAntiTruncationModel, getBaseModelName, AntiTruncationStreamProcessor, applyAntiTruncation } from '../../utils/antiTruncation.js';
 import {
   generateStreamResponse,
   generateNoStreamResponse,
@@ -59,6 +60,13 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
   const errorOptions = { scope: format === 'gemini' || format === 'claude' ? format : 'openai' };
 
   try {
+    // 流式抗截断检测（学习 gcli2api）：在 convertToGeminiCli 前剥离前缀
+    const useAntiTruncation = isAntiTruncationModel(cleanedBody.model || '');
+    if (useAntiTruncation && cleanedBody.model) {
+      cleanedBody.model = getBaseModelName(cleanedBody.model);
+      logger.info(`[GeminiCLI] 抗截断模式启用，实际模型: ${cleanedBody.model}`);
+    }
+
     const { geminiRequest, model: actualModel, features, sourceFormat } = convertToGeminiCli(cleanedBody);
     const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
     const token = await getToken(actualModel, { bypassThreshold });

@@ -284,14 +284,20 @@ registerMemoryCleanup();
 
 // ==================== 辅助函数 ====================
 
-function buildHeaders(token) {
-  return {
+function buildHeaders(token, modelName = '') {
+  const headers = {
     'Host': config.api.host,
     'User-Agent': config.api.userAgent,
     'Authorization': `Bearer ${token.access_token}`,
     'Content-Type': 'application/json',
-    'Accept-Encoding': 'gzip'
+    'Accept-Encoding': 'gzip',
+    'requestId': `req-${randomUUID()}`
   };
+  // 根据模型名称设置请求类型（学习 gcli2api）
+  if (modelName) {
+    headers['requestType'] = modelName.toLowerCase().includes('image') ? 'image_gen' : 'agent';
+  }
+  return headers;
 }
 
 function buildRequesterConfig(headers, body = null, method = "POST") {
@@ -322,12 +328,17 @@ async function handleApiError(error, token, dumpId = null) {
     await dumpFinalRawResponse(dumpId, String(errorBody ?? ''));
   }
 
-  if (status === 403) {
-    if (isCallerDoesNotHavePermission(errorBody)) {
-      throw createApiError(`超出模型最大上下文。错误详情: ${errorBody}`, status, errorBody);
-    }
+  // 可配置的自动封禁错误码（学习 gcli2api 的 auto_ban 功能）
+  const autoBanCodes = config.autoBan?.errorCodes || [403];
+  const autoBanEnabled = config.autoBan?.enabled !== false;
+
+  if (status === 403 && isCallerDoesNotHavePermission(errorBody)) {
+    throw createApiError(`超出模型最大上下文。错误详情: ${errorBody}`, status, errorBody);
+  }
+
+  if (autoBanEnabled && autoBanCodes.includes(status)) {
     tokenManager.disableCurrentToken(token);
-    throw createApiError(`该账号没有使用权限，已自动禁用。错误详情: ${errorBody}`, status, errorBody);
+    throw createApiError(`错误码 ${status} 触发自动封禁，该账号已禁用。错误详情: ${errorBody}`, status, errorBody);
   }
 
   throw createApiError(`API请求失败 (${status}): ${errorBody}`, status, errorBody);
@@ -342,7 +353,7 @@ export async function generateAssistantResponse(requestBody, token, callback) {
   const conversationId = randomUUID();
   const messageId = randomUUID();
   const modelName = requestBody.model;
-  const headers = buildHeaders(token);
+  const headers = buildHeaders(token, modelName);
   const dumpId = isDebugDumpEnabled() ? createDumpId('stream') : null;
   const streamCollector = dumpId ? createStreamCollector() : null;
   headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody)));
@@ -449,6 +460,15 @@ export async function getAvailableModels() {
     owned_by: 'google'
   }));
 
+  // 添加流式抗截断前缀版本（学习 gcli2api）
+  const antiTruncModels = modelList.map(m => ({
+    id: `流式抗截断/${m.id}`,
+    object: 'model',
+    created,
+    owned_by: 'google'
+  }));
+  modelList.push(...antiTruncModels);
+
   // 添加默认模型（如果 API 返回的列表中没有）
   const existingIds = new Set(modelList.map(m => m.id));
   for (const defaultModel of DEFAULT_MODELS) {
@@ -507,7 +527,7 @@ export async function generateAssistantResponseNoStream(requestBody, token) {
   const conversationId = randomUUID();
   const messageId = randomUUID();
   const modelName = requestBody.model;
-  const headers = buildHeaders(token);
+  const headers = buildHeaders(token, modelName);
   const dumpId = isDebugDumpEnabled() ? createDumpId('no_stream') : null;
   let num = Math.floor(Math.random() * QA_PAIRS.length);
   headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody)));
@@ -534,6 +554,11 @@ export async function generateAssistantResponseNoStream(requestBody, token) {
     await handleApiError(error, token, dumpId);
   }
   //console.log(JSON.stringify(data));
+  // 空响应检测：200 但无有效内容时抛出错误（学习 gcli2api）
+  if (!data || !data.response || !data.response.candidates || data.response.candidates.length === 0) {
+    logger.warn('[generateNoStream] API 返回 200 但响应体为空或无 candidates');
+    throw createApiError('API 返回空响应（200 但无有效内容），请重试', 500, JSON.stringify(data));
+  }
   const parts = data.response?.candidates?.[0]?.content?.parts || [];
   const parsed = parseGeminiCandidateParts({
     parts,
@@ -589,7 +614,7 @@ export async function generateImageForSD(requestBody, token) {
   const conversationId = randomUUID();
   const messageId = randomUUID();
   const modelName = requestBody.model;
-  const headers = buildHeaders(token);
+  const headers = buildHeaders(token, modelName);
   headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody),'utf-8'));
   let data;
   let num = Math.floor(Math.random() * QA_PAIRS.length);
@@ -619,6 +644,11 @@ export async function generateImageForSD(requestBody, token) {
   sendRecordTrajectoryAnalytics(token, num, trajectoryId,messageId,conversationId, modelName).catch(err => logger.warn('发送轨迹分析失败:', err.message));
   sendLog(token,num,trajectoryId,conversationId,messageId).catch(err => logger.warn('发送log失败:', err.message));
 
+  // 空响应检测（学习 gcli2api）
+  if (!data || !data.response || !data.response.candidates || data.response.candidates.length === 0) {
+    logger.warn('[generateImageForSD] API 返回 200 但响应体为空');
+    throw createApiError('图片生成 API 返回空响应', 500, JSON.stringify(data));
+  }
   const parts = data.response?.candidates?.[0]?.content?.parts || [];
   const images = parts.filter(p => p.inlineData).map(p => p.inlineData.data);
 

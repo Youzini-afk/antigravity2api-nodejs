@@ -3,6 +3,7 @@
  * 处理 /v1/messages 请求，支持流式和非流式响应
  */
 
+import { isAntiTruncationModel, getBaseModelName, AntiTruncationStreamProcessor, applyAntiTruncation } from '../../utils/antiTruncation.js';
 import { generateAssistantResponse, generateAssistantResponseNoStream, getModelsWithQuotas } from '../../api/client.js';
 import { generateClaudeRequestBody, prepareImageRequest } from '../../utils/utils.js';
 import { normalizeClaudeParameters } from '../../utils/parameterNormalizer.js';
@@ -63,8 +64,12 @@ export const handleClaudeRequest = async (req, res, isStream) => {
       return res.status(400).json(buildClaudeErrorPayload({ message: 'model is required' }, 400, errorOptions));
     }
 
+    // 流式抗截断检测（学习 gcli2api）
+    const useAntiTruncation = isAntiTruncationModel(model);
+    const actualModel = useAntiTruncation ? getBaseModelName(model) : model;
+
     const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
-    const token = await tokenManager.getToken(model, { bypassThreshold });
+    const token = await tokenManager.getToken(actualModel, { bypassThreshold });
 
     // 获取 tokenId 用于冷却状态管理
     const tokenId = await tokenManager.getTokenId(token);

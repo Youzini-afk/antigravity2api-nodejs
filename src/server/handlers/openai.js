@@ -3,6 +3,7 @@
  * 处理 /v1/chat/completions 请求，支持流式和非流式响应
  */
 
+import { isAntiTruncationModel, getBaseModelName, AntiTruncationStreamProcessor, applyAntiTruncation } from '../../utils/antiTruncation.js';
 import { generateAssistantResponse, generateAssistantResponseNoStream, getModelsWithQuotas } from '../../api/client.js';
 import { generateRequestBody, prepareImageRequest } from '../../utils/utils.js';
 import { buildOpenAIErrorPayload } from '../../utils/errors.js';
@@ -48,8 +49,12 @@ export const handleOpenAIRequest = async (req, res) => {
       );
     }
 
+    // 流式抗截断检测（学习 gcli2api）
+    const useAntiTruncation = isAntiTruncationModel(model);
+    const actualModel = useAntiTruncation ? getBaseModelName(model) : model;
+
     const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
-    const token = await tokenManager.getToken(model, { bypassThreshold });
+    const token = await tokenManager.getToken(actualModel, { bypassThreshold });
 
     // 获取 tokenId 用于冷却状态管理
     const tokenId = await tokenManager.getTokenId(token);
@@ -72,7 +77,7 @@ export const handleOpenAIRequest = async (req, res) => {
     });
 
     const isImageModel = model.includes('-image');
-    const requestBody = generateRequestBody(messages, model, params, tools, token);
+    const requestBody = generateRequestBody(messages, actualModel, params, tools, token);
 
     if (isImageModel) {
       prepareImageRequest(requestBody);

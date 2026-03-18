@@ -798,6 +798,23 @@ export function buildConfig(jsonConfig) {
     // 是否合并系统提示词为单个 part，false 则保留多 part 结构（需要先开启 useContextSystemPrompt）
     mergeSystemPrompt: jsonConfig.other?.mergeSystemPrompt !== false,
     skipProjectIdFetch: jsonConfig.other?.skipProjectIdFetch === true,
+    // 可配置的自动封禁（学习 gcli2api 的 auto_ban 功能）
+    antiTruncation: {
+      maxAttempts: Number.isFinite(jsonConfig.other?.antiTruncation?.maxAttempts)
+        ? jsonConfig.other.antiTruncation.maxAttempts
+        : 3,
+    },
+    autoBan: {
+      enabled: jsonConfig.other?.autoBan?.enabled !== false,
+      errorCodes: Array.isArray(jsonConfig.other?.autoBan?.errorCodes)
+        ? jsonConfig.other.autoBan.errorCodes
+        : [403],  // 默认只禁用 403
+    },
+    // 获取 projectId 时使用的 API Host（可独立配置，默认与主 API 相同）
+    // 参考 gcli2api 项目，可设置为 sandbox 端点: daily-cloudcode-pa.sandbox.googleapis.com
+    projectIdApiHost: jsonConfig.api?.projectIdHost || apiConfig.host,
+    // 获取 projectId 时使用的 User-Agent（可独立配置，默认与主 API 相同）
+    projectIdUserAgent: jsonConfig.api?.projectIdUserAgent || apiConfig.userAgent,
     useContextSystemPrompt: jsonConfig.other?.useContextSystemPrompt === true,
     passSignatureToClient: jsonConfig.other?.passSignatureToClient === true,
     useFallbackSignature: jsonConfig.other?.useFallbackSignature === true,

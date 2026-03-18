@@ -3,6 +3,7 @@
  * 处理 /v1beta/models/* 请求，支持流式和非流式响应
  */
 
+import { isAntiTruncationModel, getBaseModelName, AntiTruncationStreamProcessor, applyAntiTruncation } from '../../utils/antiTruncation.js';
 import { generateAssistantResponse, generateAssistantResponseNoStream, getAvailableModels, getModelsWithQuotas } from '../../api/client.js';
 import { generateGeminiRequestBody, prepareImageRequest } from '../../utils/utils.js';
 import { buildGeminiErrorPayload } from '../../utils/errors.js';
@@ -100,6 +101,13 @@ export const handleGeminiModelDetail = async (req, res) => {
  * @param {boolean} isStream - 是否流式响应
  */
 export const handleGeminiRequest = async (req, res, modelName, isStream) => {
+  // 流式抗截断检测（学习 gcli2api）
+  const useAntiTruncation = isAntiTruncationModel(modelName);
+  if (useAntiTruncation) {
+    modelName = getBaseModelName(modelName);
+    logger.info(`[Gemini] 抗截断模式启用，实际模型: ${modelName}`);
+  }
+
   const safeRetries = getSafeRetries(config.retryTimes);
   const errorOptions = { scope: 'gemini' };
 
