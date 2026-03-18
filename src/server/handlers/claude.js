@@ -84,17 +84,17 @@ export const handleClaudeRequest = async (req, res, isStream) => {
     // 创建 with429Retry 选项
     const createRetryOptions = (prefix) => ({
       loggerPrefix: prefix,
-      onAttempt: () => tokenManager.recordRequest(token, model),
+      onAttempt: () => tokenManager.recordRequest(token, actualModel),
       tokenId,
-      modelId: model,
+      modelId: actualModel,
       refreshQuota
     });
 
     // 使用统一参数规范化模块处理 Claude 格式参数
     const parameters = normalizeClaudeParameters(rawParams);
 
-    const isImageModel = model.includes('-image');
-    const requestBody = generateClaudeRequestBody(messages, model, parameters, tools, system, token);
+    const isImageModel = actualModel.includes('-image');
+    const requestBody = generateClaudeRequestBody(messages, actualModel, parameters, tools, system, token);
 
     if (isImageModel) {
       prepareImageRequest(requestBody);
@@ -168,95 +168,13 @@ export const handleClaudeRequest = async (req, res, isStream) => {
           return;
         }
 
-        await with429Retry(
-          () => generateAssistantResponse(requestBody, token, (data) => {
-            if (data.type === 'usage') {
-              usageData = data.usage;
-            } else if (data.type === 'reasoning') {
-              // 思维链内容 - 使用 thinking 类型
-              if (!reasoningSent) {
-                // 如果之前已经发送了 text block，先关闭它
-                if (currentBlockType === 'text') {
-                  res.write(createClaudeStreamEvent('content_block_stop', {
-                    type: "content_block_stop",
-                    index: contentIndex
-                  }));
-                  contentIndex++;
-                  currentBlockType = null;
-                }
-                // 开始思维块
-                const contentBlock = { type: "thinking", thinking: "" };
-                if (data.thoughtSignature && config.passSignatureToClient) {
-                  contentBlock.signature = data.thoughtSignature;
-                }
-                res.write(createClaudeStreamEvent('content_block_start', {
-                  type: "content_block_start",
-                  index: contentIndex,
-                  content_block: contentBlock
-                }));
-                currentBlockType = 'thinking';
-                reasoningSent = true;
-              }
-              // 发送思维增量
-              const delta = { type: "thinking_delta", thinking: data.reasoning_content || '' };
-              if (data.thoughtSignature && config.passSignatureToClient) {
-                delta.signature = data.thoughtSignature;
-              }
-              res.write(createClaudeStreamEvent('content_block_delta', {
-                type: "content_block_delta",
-                index: contentIndex,
-                delta: delta
-              }));
-            } else if (data.type === 'tool_calls') {
-              hasToolCall = true;
-              // 结束之前的块（如果有）
-              if (currentBlockType) {
-                res.write(createClaudeStreamEvent('content_block_stop', {
-                  type: "content_block_stop",
-                  index: contentIndex
-                }));
-                contentIndex++;
-              }
-              // 工具调用
-              for (const tc of data.tool_calls) {
-                try {
-                  const inputObj = JSON.parse(tc.function.arguments);
-                  const toolContentBlock = { type: "tool_use", id: tc.id, name: tc.function.name, input: {} };
-                  if (tc.thoughtSignature && config.passSignatureToClient) {
-                    toolContentBlock.signature = tc.thoughtSignature;
-                  }
-                  res.write(createClaudeStreamEvent('content_block_start', {
-                    type: "content_block_start",
-                    index: contentIndex,
-                    content_block: toolContentBlock
-                  }));
-                  // 发送 input 增量
-                  res.write(createClaudeStreamEvent('content_block_delta', {
-                    type: "content_block_delta",
-                    index: contentIndex,
-                    delta: { type: "input_json_delta", partial_json: JSON.stringify(inputObj) }
-                  }));
-                  res.write(createClaudeStreamEvent('content_block_stop', {
-                    type: "content_block_stop",
-                    index: contentIndex
-                  }));
-                  contentIndex++;
-                } catch (e) {
-                  // 解析失败，跳过
-                }
-              }
-              currentBlockType = null;
-            } else {
-              // 普通文本内容
-              const textContent = data.content || '';
-
-              // 如果 thinking 还没发送且内容是空的，跳过（避免在 thinking 之前创建空的 text block）
-              if (!reasoningSent && !textContent) {
-                return;
-              }
-
-              if (currentBlockType === 'thinking') {
-                // 结束思维块
+        // 提取流式回调（抗截断和正常模式共用）
+        const onStreamEvent = (data) => {
+          if (data.type === 'usage') {
+            usageData = data.usage;
+          } else if (data.type === 'reasoning') {
+            if (!reasoningSent) {
+              if (currentBlockType === 'text') {
                 res.write(createClaudeStreamEvent('content_block_stop', {
                   type: "content_block_stop",
                   index: contentIndex
@@ -264,26 +182,109 @@ export const handleClaudeRequest = async (req, res, isStream) => {
                 contentIndex++;
                 currentBlockType = null;
               }
-              if (currentBlockType !== 'text') {
-                // 开始文本块
+              const contentBlock = { type: "thinking", thinking: "" };
+              if (data.thoughtSignature && config.passSignatureToClient) {
+                contentBlock.signature = data.thoughtSignature;
+              }
+              res.write(createClaudeStreamEvent('content_block_start', {
+                type: "content_block_start",
+                index: contentIndex,
+                content_block: contentBlock
+              }));
+              currentBlockType = 'thinking';
+              reasoningSent = true;
+            }
+            const delta = { type: "thinking_delta", thinking: data.reasoning_content || '' };
+            if (data.thoughtSignature && config.passSignatureToClient) {
+              delta.signature = data.thoughtSignature;
+            }
+            res.write(createClaudeStreamEvent('content_block_delta', {
+              type: "content_block_delta",
+              index: contentIndex,
+              delta: delta
+            }));
+          } else if (data.type === 'tool_calls') {
+            hasToolCall = true;
+            if (currentBlockType) {
+              res.write(createClaudeStreamEvent('content_block_stop', {
+                type: "content_block_stop",
+                index: contentIndex
+              }));
+              contentIndex++;
+            }
+            for (const tc of data.tool_calls) {
+              try {
+                const inputObj = JSON.parse(tc.function.arguments);
+                const toolContentBlock = { type: "tool_use", id: tc.id, name: tc.function.name, input: {} };
+                if (tc.thoughtSignature && config.passSignatureToClient) {
+                  toolContentBlock.signature = tc.thoughtSignature;
+                }
                 res.write(createClaudeStreamEvent('content_block_start', {
                   type: "content_block_start",
                   index: contentIndex,
-                  content_block: { type: "text", text: "" }
+                  content_block: toolContentBlock
                 }));
-                currentBlockType = 'text';
+                res.write(createClaudeStreamEvent('content_block_delta', {
+                  type: "content_block_delta",
+                  index: contentIndex,
+                  delta: { type: "input_json_delta", partial_json: JSON.stringify(inputObj) }
+                }));
+                res.write(createClaudeStreamEvent('content_block_stop', {
+                  type: "content_block_stop",
+                  index: contentIndex
+                }));
+                contentIndex++;
+              } catch (e) {
+                // 解析失败，跳过
               }
-              // 发送文本增量
-              res.write(createClaudeStreamEvent('content_block_delta', {
-                type: "content_block_delta",
-                index: contentIndex,
-                delta: { type: "text_delta", text: textContent }
-              }));
             }
-          }),
-          safeRetries,
-          createRetryOptions('claude.stream ')
-        );
+            currentBlockType = null;
+          } else {
+            const textContent = data.content || '';
+            if (!reasoningSent && !textContent) {
+              return;
+            }
+            if (currentBlockType === 'thinking') {
+              res.write(createClaudeStreamEvent('content_block_stop', {
+                type: "content_block_stop",
+                index: contentIndex
+              }));
+              contentIndex++;
+              currentBlockType = null;
+            }
+            if (currentBlockType !== 'text') {
+              res.write(createClaudeStreamEvent('content_block_start', {
+                type: "content_block_start",
+                index: contentIndex,
+                content_block: { type: "text", text: "" }
+              }));
+              currentBlockType = 'text';
+            }
+            res.write(createClaudeStreamEvent('content_block_delta', {
+              type: "content_block_delta",
+              index: contentIndex,
+              delta: { type: "text_delta", text: textContent }
+            }));
+          }
+        };
+
+        if (useAntiTruncation) {
+          const processor = new AntiTruncationStreamProcessor(
+            (payload, cb) => with429Retry(
+              () => generateAssistantResponse(payload, token, cb),
+              safeRetries,
+              createRetryOptions('claude.stream.anti_trunc ')
+            ),
+            requestBody
+          );
+          await processor.run(onStreamEvent);
+        } else {
+          await with429Retry(
+            () => generateAssistantResponse(requestBody, token, onStreamEvent),
+            safeRetries,
+            createRetryOptions('claude.stream ')
+          );
+        }
 
         // 结束最后一个内容块
         if (currentBlockType) {

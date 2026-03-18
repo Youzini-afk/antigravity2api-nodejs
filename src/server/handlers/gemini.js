@@ -169,28 +169,40 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
         let usageData = null;
         let hasToolCall = false;
 
-        await with429Retry(
-          () => generateAssistantResponse(requestBody, token, (data) => {
-            if (data.type === 'usage') {
-              usageData = data.usage;
-            } else if (data.type === 'reasoning') {
-              // Gemini 思考内容
-              const chunk = createGeminiResponse(null, data.reasoning_content, data.thoughtSignature, null, null, null, { passSignatureToClient: config.passSignatureToClient });
-              writeStreamData(res, chunk);
-            } else if (data.type === 'tool_calls') {
-              hasToolCall = true;
-              // Gemini 工具调用
-              const chunk = createGeminiResponse(null, null, null, data.tool_calls, null, null, { passSignatureToClient: config.passSignatureToClient });
-              writeStreamData(res, chunk);
-            } else {
-              // 普通文本
-              const chunk = createGeminiResponse(data.content, null, null, null, null, null, { passSignatureToClient: config.passSignatureToClient });
-              writeStreamData(res, chunk);
-            }
-          }),
-          safeRetries,
-          createRetryOptions('gemini.stream ')
-        );
+        // 提取流式回调（抗截断和正常模式共用）
+        const onStreamEvent = (data) => {
+          if (data.type === 'usage') {
+            usageData = data.usage;
+          } else if (data.type === 'reasoning') {
+            const chunk = createGeminiResponse(null, data.reasoning_content, data.thoughtSignature, null, null, null, { passSignatureToClient: config.passSignatureToClient });
+            writeStreamData(res, chunk);
+          } else if (data.type === 'tool_calls') {
+            hasToolCall = true;
+            const chunk = createGeminiResponse(null, null, null, data.tool_calls, null, null, { passSignatureToClient: config.passSignatureToClient });
+            writeStreamData(res, chunk);
+          } else {
+            const chunk = createGeminiResponse(data.content, null, null, null, null, null, { passSignatureToClient: config.passSignatureToClient });
+            writeStreamData(res, chunk);
+          }
+        };
+
+        if (useAntiTruncation) {
+          const processor = new AntiTruncationStreamProcessor(
+            (payload, cb) => with429Retry(
+              () => generateAssistantResponse(payload, token, cb),
+              safeRetries,
+              createRetryOptions('gemini.stream.anti_trunc ')
+            ),
+            requestBody
+          );
+          await processor.run(onStreamEvent);
+        } else {
+          await with429Retry(
+            () => generateAssistantResponse(requestBody, token, onStreamEvent),
+            safeRetries,
+            createRetryOptions('gemini.stream ')
+          );
+        }
 
         // 发送结束块和 usage
         const finishReason = hasToolCall ? "STOP" : "STOP"; // Gemini 工具调用也是 STOP

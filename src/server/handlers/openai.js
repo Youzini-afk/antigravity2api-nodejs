@@ -70,13 +70,13 @@ export const handleOpenAIRequest = async (req, res) => {
     // 创建 with429Retry 选项
     const createRetryOptions = (prefix) => ({
       loggerPrefix: prefix,
-      onAttempt: () => tokenManager.recordRequest(token, model),
+      onAttempt: () => tokenManager.recordRequest(token, actualModel),
       tokenId,
-      modelId: model,
+      modelId: actualModel,
       refreshQuota
     });
 
-    const isImageModel = model.includes('-image');
+    const isImageModel = actualModel.includes('-image');
     const requestBody = generateRequestBody(messages, actualModel, params, tools, token);
 
     if (isImageModel) {
@@ -109,37 +109,52 @@ export const handleOpenAIRequest = async (req, res) => {
           let hasToolCall = false;
           let usageData = null;
 
-          await with429Retry(
-            () => generateAssistantResponse(requestBody, token, (data) => {
-              if (data.type === 'usage') {
-                usageData = data.usage;
-              } else if (data.type === 'reasoning') {
-                const delta = { reasoning_content: data.reasoning_content };
-                if (data.thoughtSignature && config.passSignatureToClient) {
-                  delta.thoughtSignature = data.thoughtSignature;
-                }
-                writeStreamData(res, createStreamChunk(id, created, model, delta));
-              } else if (data.type === 'tool_calls') {
-                hasToolCall = true;
-                // 根据配置决定是否透传工具调用中的签名
-                const toolCallsWithIndex = data.tool_calls.map((toolCall, index) => {
-                  if (config.passSignatureToClient) {
-                    return { index, ...toolCall };
-                  } else {
-                    const { thoughtSignature, ...rest } = toolCall;
-                    return { index, ...rest };
-                  }
-                });
-                const delta = { tool_calls: toolCallsWithIndex };
-                writeStreamData(res, createStreamChunk(id, created, model, delta));
-              } else {
-                const delta = { content: data.content };
-                writeStreamData(res, createStreamChunk(id, created, model, delta));
+          // 提取流式回调（抗截断和正常模式共用）
+          const onStreamEvent = (data) => {
+            if (data.type === 'usage') {
+              usageData = data.usage;
+            } else if (data.type === 'reasoning') {
+              const delta = { reasoning_content: data.reasoning_content };
+              if (data.thoughtSignature && config.passSignatureToClient) {
+                delta.thoughtSignature = data.thoughtSignature;
               }
-            }),
-            safeRetries,
-            createRetryOptions('chat.stream ')
-          );
+              writeStreamData(res, createStreamChunk(id, created, model, delta));
+            } else if (data.type === 'tool_calls') {
+              hasToolCall = true;
+              const toolCallsWithIndex = data.tool_calls.map((toolCall, index) => {
+                if (config.passSignatureToClient) {
+                  return { index, ...toolCall };
+                } else {
+                  const { thoughtSignature, ...rest } = toolCall;
+                  return { index, ...rest };
+                }
+              });
+              const delta = { tool_calls: toolCallsWithIndex };
+              writeStreamData(res, createStreamChunk(id, created, model, delta));
+            } else {
+              const delta = { content: data.content };
+              writeStreamData(res, createStreamChunk(id, created, model, delta));
+            }
+          };
+
+          if (useAntiTruncation) {
+            // 抗截断模式：用 AntiTruncationStreamProcessor 包装流式请求
+            const processor = new AntiTruncationStreamProcessor(
+              (payload, cb) => with429Retry(
+                () => generateAssistantResponse(payload, token, cb),
+                safeRetries,
+                createRetryOptions('chat.stream.anti_trunc ')
+              ),
+              requestBody
+            );
+            await processor.run(onStreamEvent);
+          } else {
+            await with429Retry(
+              () => generateAssistantResponse(requestBody, token, onStreamEvent),
+              safeRetries,
+              createRetryOptions('chat.stream ')
+            );
+          }
 
           writeStreamData(res, { ...createStreamChunk(id, created, model, {}, hasToolCall ? 'tool_calls' : 'stop'), usage: usageData });
         }

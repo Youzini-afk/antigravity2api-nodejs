@@ -461,7 +461,7 @@ export async function getAvailableModels() {
   }));
 
   // 添加流式抗截断前缀版本（学习 gcli2api）
-  const antiTruncModels = modelList.map(m => ({
+  const antiTruncModels = modelList.filter(m => !m.id.startsWith('流式抗截断/')).map(m => ({
     id: `流式抗截断/${m.id}`,
     object: 'model',
     created,

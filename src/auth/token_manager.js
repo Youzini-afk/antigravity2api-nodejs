@@ -1656,7 +1656,7 @@ class TokenManager {
    */
   async prewarmNextToken(modelName) {
     try {
-      const nextToken = await this.getToken(modelName, { silent: true });
+      const nextToken = await this.getToken(modelName);
       if (nextToken) {
         log.debug(`[prewarm] 预热凭证完成: ...${nextToken.access_token?.slice(-8)}`);
       }

@@ -108,11 +108,23 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
           responseModel
         });
 
-        await with429Retry(
-          () => generateStreamResponse(geminiRequest, token, actualModel, (data) => writer.onEvent(data)),
-          safeRetries,
-          createRetryOptions('[GeminiCLI] chat.stream ')
-        );
+        if (useAntiTruncation) {
+          const processor = new AntiTruncationStreamProcessor(
+            (payload, cb) => with429Retry(
+              () => generateStreamResponse(payload, token, actualModel, cb),
+              safeRetries,
+              createRetryOptions('[GeminiCLI] chat.stream.anti_trunc ')
+            ),
+            geminiRequest
+          );
+          await processor.run((data) => writer.onEvent(data));
+        } else {
+          await with429Retry(
+            () => generateStreamResponse(geminiRequest, token, actualModel, (data) => writer.onEvent(data)),
+            safeRetries,
+            createRetryOptions('[GeminiCLI] chat.stream ')
+          );
+        }
 
         writer.finalize();
 
