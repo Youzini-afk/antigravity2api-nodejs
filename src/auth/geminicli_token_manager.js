@@ -1271,7 +1271,7 @@ class GeminiCliTokenManager {
     return result;
   }
 
-    async addToken(tokenData) {
+  async addToken(tokenData) {
     try {
       // 自动转换 gcli2api 格式的凭证（兼容 project_id、expires_at 等字段）
       const normalized = GeminiCliTokenManager.normalizeCredentialFormat(tokenData);

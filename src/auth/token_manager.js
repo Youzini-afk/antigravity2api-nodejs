@@ -338,7 +338,6 @@ class TokenManager {
     try {
       const {projectId,sub} = await this._tryOnboardUser(token) || {};
       if (projectId) return {projectId, sub};
-      log.warn('[fetchProjectId] loadCodeAssist 和 onboardUser 均未能获取 projectId');
     } catch (err) {
       log.warn(`[fetchProjectId] onboardUser 失败: ${err.message}`);
     }
