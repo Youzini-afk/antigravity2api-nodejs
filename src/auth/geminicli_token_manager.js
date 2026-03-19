@@ -1236,30 +1236,67 @@ class GeminiCliTokenManager {
     log.info('[GeminiCLI] Token已热重载');
   }
 
-  async addToken(tokenData) {
+  /**
+   * 将 gcli2api 格式的凭证数据转换为 Node.js 项目格式
+   * 自动处理字段名映射和过期时间格式差异
+   * @param {Object} data - 原始凭证数据（可能来自 gcli2api 或本项目）
+   * @returns {Object} 格式化后的凭证数据
+   */
+  static normalizeCredentialFormat(data) {
+    const result = { ...data };
+
+    // 1. project_id → projectId（gcli2api 用下划线格式）
+    if (result.project_id && !result.projectId) {
+      result.projectId = result.project_id;
+    }
+    delete result.project_id;
+
+    // 2. expires_at (ISO datetime) → expires_in + timestamp
+    if (result.expires_at && !result.timestamp) {
+      const expiresAtMs = new Date(result.expires_at).getTime();
+      if (!isNaN(expiresAtMs)) {
+        result.timestamp = Date.now();
+        result.expires_in = Math.max(0, Math.floor((expiresAtMs - result.timestamp) / 1000));
+      }
+    }
+    delete result.expires_at;
+
+    // 3. 清理 gcli2api 特有的字段（Node.js 使用全局 GEMINICLI_OAUTH_CONFIG）
+    delete result.client_id;
+    delete result.client_secret;
+
+    // 4. 确保必需字段有默认值
+    if (result.enable === undefined) result.enable = true;
+
+    return result;
+  }
+
+    async addToken(tokenData) {
     try {
+      // 自动转换 gcli2api 格式的凭证（兼容 project_id、expires_at 等字段）
+      const normalized = GeminiCliTokenManager.normalizeCredentialFormat(tokenData);
       const allTokens = await this.store.readAll();
 
       const newToken = {
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        expires_in: tokenData.expires_in || 3599,
-        timestamp: tokenData.timestamp || Date.now(),
-        enable: tokenData.enable !== undefined ? tokenData.enable : true,
-        useThreshold: tokenData.useThreshold !== undefined
-          ? tokenData.useThreshold
+        access_token: normalized.access_token,
+        refresh_token: normalized.refresh_token,
+        expires_in: normalized.expires_in || 3599,
+        timestamp: normalized.timestamp || Date.now(),
+        enable: normalized.enable !== undefined ? normalized.enable : true,
+        useThreshold: normalized.useThreshold !== undefined
+          ? normalized.useThreshold
           : DEFAULT_TOKEN_THRESHOLD_CONTROL.useThreshold,
-        allowBypassWithSpecialKey: tokenData.allowBypassWithSpecialKey !== undefined
-          ? tokenData.allowBypassWithSpecialKey
+        allowBypassWithSpecialKey: normalized.allowBypassWithSpecialKey !== undefined
+          ? normalized.allowBypassWithSpecialKey
           : DEFAULT_TOKEN_THRESHOLD_CONTROL.allowBypassWithSpecialKey
       };
 
-      if (tokenData.email) {
-        newToken.email = tokenData.email;
+      if (normalized.email) {
+        newToken.email = normalized.email;
       }
 
-      if (tokenData.projectId) {
-        newToken.projectId = tokenData.projectId;
+      if (normalized.projectId) {
+        newToken.projectId = normalized.projectId;
       }
 
       allTokens.push(newToken);
