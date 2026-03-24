@@ -1258,6 +1258,9 @@ router.put("/rotation", cookieAuthMiddleware, (req, res) => {
     // 重载配置到内存
     reloadConfig();
 
+    // 同步 GeminiCLI 池的轮询/阈值配置（它从 config.json 的 rotation + geminicli.rotation 合并读取）
+    geminicliTokenManager.loadRotationConfig();
+
     logger.info(
       `主池轮询策略已更新: ${strategy || "未变"}, 请求次数: ${normalizedRequestCount ?? "未变"}, 阈值策略: ${thresholdPolicy !== undefined ? "已更新" : "未变"}`,
     );
