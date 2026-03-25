@@ -4,9 +4,6 @@
  */
 
 import config from '../config/config.js';
-
-// "Resource has been exhausted (e.g. check quota)." 无 resetTimestamp 时的默认冷却时间
-const RESOURCE_EXHAUSTED_FALLBACK_HOURS = 12;
 import logger from '../utils/logger.js';
 import memoryManager, { registerMemoryPoolCleanup } from '../utils/memoryManager.js';
 import { DEFAULT_HEARTBEAT_INTERVAL, LONG_COOLDOWN_THRESHOLD } from '../constants/index.js';
@@ -14,6 +11,9 @@ import tokenCooldownManager from '../auth/token_cooldown_manager.js';
 import tokenManager from '../auth/token_manager.js';
 import quotaManager from '../auth/quota_manager.js';
 import { getGroupKey } from '../utils/modelGroups.js';
+
+// "Resource has been exhausted (e.g. check quota)." 无 resetTimestamp 时的默认冷却时间
+const RESOURCE_EXHAUSTED_FALLBACK_HOURS = 12;
 
 // ==================== 心跳机制（防止 CF 超时） ====================
 const HEARTBEAT_INTERVAL = config.server.heartbeatInterval || DEFAULT_HEARTBEAT_INTERVAL;

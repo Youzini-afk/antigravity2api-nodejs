@@ -612,7 +612,7 @@ class GeminiCliTokenManager {
 
           if (projectId) {
             log.info(`[GeminiCLI] onboardUser 成功获取 projectId: ${projectId}`);
-            return projectId;
+            return { projectId, tier: 'pro' };
           }
           log.warn('[GeminiCLI] onboardUser 完成但响应中无 projectId');
           return null;
@@ -1469,6 +1469,7 @@ class GeminiCliTokenManager {
 
     // 更新并保存
     tokenData.projectId = projectId;
+    if (tier) tokenData.tier = tier;
     
     // 更新文件
     const allTokens = await this.store.readAll();
@@ -1478,6 +1479,7 @@ class GeminiCliTokenManager {
     );
     if (index !== -1) {
       allTokens[index].projectId = projectId;
+      if (tier) allTokens[index].tier = tier;
       await this.store.writeAll(allTokens);
     }
 
@@ -1485,9 +1487,10 @@ class GeminiCliTokenManager {
     const memoryToken = this.tokens.find(t => t.refresh_token === tokenData.refresh_token);
     if (memoryToken) {
       memoryToken.projectId = projectId;
+      if (tier) memoryToken.tier = tier;
     }
 
-    return { projectId };
+    return { projectId, tier };
   }
 
   /**
