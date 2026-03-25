@@ -23,6 +23,21 @@ const GEMINICLI_API_CONFIG = {
   BASE_URL: 'https://cloudcode-pa.googleapis.com'
 };
 
+// Subscription tier 映射表（raw tier → 标准化）
+const TIER_MAP = {
+  'g1-ultra-tier': 'ultra',
+  'ws-ai-ultra-business-tier': 'ultra',
+  'g1-pro-tier': 'pro',
+  'helium-tier': 'pro',
+  'standard-tier': 'free',
+  'free-tier': 'free',
+};
+
+function mapRawTier(rawTier) {
+  if (!rawTier) return 'pro';
+  return TIER_MAP[rawTier.toLowerCase()] || 'pro';
+}
+
 // 轮询策略枚举（复用 token_manager.js 的定义）
 const RotationStrategy = {
   ROUND_ROBIN: 'round_robin',           // 均衡负载：每次请求切换
@@ -497,12 +512,19 @@ class GeminiCliTokenManager {
 
       const data = response.data;
       
+      // 提取订阅等级（优先 paidTier，其次 currentTier）
+      const rawTier = data.paidTier?.id || data.currentTier?.id || null;
+      const tier = mapRawTier(rawTier);
+      if (rawTier) {
+        log.info(`[GeminiCLI] Raw tier '${rawTier}' → '${tier}'`);
+      }
+
       // 检查是否有 currentTier（表示用户已激活）
       if (data.currentTier) {
         const projectId = data.cloudaicompanionProject;
         if (projectId) {
-          log.info(`[GeminiCLI] 成功获取 projectId: ${projectId}`);
-          return projectId;
+          log.info(`[GeminiCLI] 成功获取 projectId: ${projectId}, tier: ${tier}`);
+          return { projectId, tier };
         }
         log.warn('[GeminiCLI] loadCodeAssist 响应中无 projectId');
         return null;
@@ -620,15 +642,19 @@ class GeminiCliTokenManager {
       await this.refreshToken(token);
     }
 
-    // 获取 projectId（如果没有）
+    // 获取 projectId 和 tier（如果没有）
     if (!token.projectId) {
-      const projectId = await this.fetchProjectId(token);
-      if (!projectId) {
+      const result = await this.fetchProjectId(token);
+      if (!result?.projectId) {
         log.warn(`[GeminiCLI] 无法获取 projectId，禁用账号`);
         return 'disable';
       }
-      token.projectId = projectId;
+      token.projectId = result.projectId;
+      if (result.tier) token.tier = result.tier;
       this.saveToFile(token);
+    } else if (!token.tier) {
+      // 已有 projectId 但缺少 tier，默认 pro
+      token.tier = 'pro';
     }
 
     return 'ready';
@@ -699,6 +725,15 @@ class GeminiCliTokenManager {
 
   _canUseTokenForModel(token, modelId) {
     if (!token || !modelId) return true;
+
+    // Tier 过滤：gemini-3.1-pro-preview 仅 pro/ultra 可用
+    if (modelId && token.tier === 'free') {
+      const lower = modelId.toLowerCase();
+      if (lower.includes('gemini-3.1-pro-preview')) {
+        return false;
+      }
+    }
+
     if (!this._isTokenAvailableForModel(token, modelId)) {
       return false;
     }
@@ -1268,6 +1303,11 @@ class GeminiCliTokenManager {
     // 4. 确保必需字段有默认值
     if (result.enable === undefined) result.enable = true;
 
+    // 5. tier 兼容（gcli2api 可能导出 tier 字段）
+    if (result.tier) {
+      result.tier = result.tier.toLowerCase();
+    }
+
     return result;
   }
 
@@ -1297,6 +1337,10 @@ class GeminiCliTokenManager {
 
       if (normalized.projectId) {
         newToken.projectId = normalized.projectId;
+      }
+
+      if (normalized.tier) {
+        newToken.tier = normalized.tier;
       }
 
       allTokens.push(newToken);
@@ -1390,6 +1434,7 @@ class GeminiCliTokenManager {
           enable: token.enable !== false,
           email: token.email || null,
           projectId: token.projectId || null,
+          tier: token.tier || 'pro',
           quota: quotaSummary
         };
       });
@@ -1415,7 +1460,9 @@ class GeminiCliTokenManager {
       await this.refreshToken(tokenData);
     }
 
-    const projectId = await this.fetchProjectId(tokenData);
+    const result = await this.fetchProjectId(tokenData);
+    const projectId = result?.projectId;
+    const tier = result?.tier;
     if (!projectId) {
       throw new TokenError('无法获取 projectId，该账号可能无资格', null, 400);
     }

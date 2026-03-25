@@ -358,9 +358,7 @@ class TokenManager {
     const requestUrl = `https://${apiHost}/v1internal:loadCodeAssist`;
     const requestBody = {
       metadata: {
-        ideType: 'ANTIGRAVITY',
-        platform: 'PLATFORM_UNSPECIFIED',
-        pluginType: 'GEMINI'
+        ideType: 'ANTIGRAVITY'
       }
     };
 
@@ -381,14 +379,13 @@ class TokenManager {
     const data = response.data;
     // log.info(`[loadCodeAssist] 响应: ${JSON.stringify(data)}`); // 响应可能很大，不打印
 
-    // 检查是否有 currentTier（表示用户已激活）
-    let sub = "free-tier";
+    // 提取订阅等级（优先 paidTier，其次 currentTier）
+    let sub = data?.paidTier?.id || data?.currentTier?.id || "free-tier";
     if (data?.currentTier) {
       log.info('[loadCodeAssist] 用户已激活');
       const projectId = data.cloudaicompanionProject;
       if (projectId) {
-        log.info(`[loadCodeAssist] 成功获取 projectId: ${projectId}`);
-        sub = data.currentTier.id;
+        log.info(`[loadCodeAssist] 成功获取 projectId: ${projectId}, tier: ${sub}`);
         return {projectId, sub};
       }
       log.warn('[loadCodeAssist] 响应中无 projectId');

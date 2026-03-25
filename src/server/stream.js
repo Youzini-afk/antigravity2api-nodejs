@@ -4,6 +4,9 @@
  */
 
 import config from '../config/config.js';
+
+// "Resource has been exhausted (e.g. check quota)." 无 resetTimestamp 时的默认冷却时间
+const RESOURCE_EXHAUSTED_FALLBACK_HOURS = 12;
 import logger from '../utils/logger.js';
 import memoryManager, { registerMemoryPoolCleanup } from '../utils/memoryManager.js';
 import { DEFAULT_HEARTBEAT_INTERVAL, LONG_COOLDOWN_THRESHOLD } from '../constants/index.js';
@@ -393,6 +396,27 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
             );
             tokenCooldownManager.setCooldown(tokenId, modelId, finalResetTimestamp);
             // 不重试，直接抛出错误
+            throw error;
+          }
+        }
+
+        // 12h 硬冷却: "Resource has been exhausted (e.g. check quota)." 无 resetTimestamp
+        // 学习 gcli2api: 当 API 返回此错误但不含 quotaResetTimeStamp 时，设置 12h 默认冷却
+        if (status === 429 && tokenId && modelId && explicitDelayMs === null) {
+          const body = extractUpstreamErrorBody(error);
+          const inner = (body && typeof body === 'object') ? (body.error || body) : null;
+          const msg = inner?.message || '';
+          if (msg.includes('Resource has been exhausted') || inner?.status === 'RESOURCE_EXHAUSTED') {
+            const fallbackMs = RESOURCE_EXHAUSTED_FALLBACK_HOURS * 3600 * 1000;
+            const resetTimestamp = Date.now() + fallbackMs;
+            const groupKey = getGroupKey(modelId);
+            const resetDate = new Date(resetTimestamp);
+            logger.warn(
+              `${loggerPrefix}收到 RESOURCE_EXHAUSTED 无恢复时间，` +
+              `设置 ${RESOURCE_EXHAUSTED_FALLBACK_HOURS}h 默认冷却，` +
+              `禁用 ${groupKey} 系列直到 ${resetDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`
+            );
+            tokenCooldownManager.setCooldown(tokenId, modelId, resetTimestamp);
             throw error;
           }
         }

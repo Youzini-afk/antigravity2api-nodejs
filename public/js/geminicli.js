@@ -255,6 +255,12 @@ function renderGeminiCliTokens(tokens) {
                     <span class="info-value ${hasProjectId ? '' : 'text-warning'}">${safeProjectId || '未获取'}</span>
                     ${!hasProjectId ? `<button class="btn btn-info btn-xs" onclick="fetchGeminiCliProjectId('${safeTokenId}')" style="margin-left: auto;">获取</button>` : ''}
                 </div>
+                <div class="info-row" title="订阅等级">
+                    <span class="info-label">🏷️</span>
+                    <span class="info-value">
+                        <span style="display:inline-block;padding:1px 8px;border-radius:4px;font-size:0.7rem;font-weight:600;color:#fff;background:${{ultra:'#ff9800',pro:'#2e7d32',free:'#607d8b'}[token.tier||'pro']||'#2e7d32'}">${(token.tier||'pro').toUpperCase()}</span>
+                    </span>
+                </div>
                 ${renderGeminiCliQuota(token.quota)}
             </div>
             <div class="token-id-row" title="Token ID: ${escapeHtml(tokenId)}">
