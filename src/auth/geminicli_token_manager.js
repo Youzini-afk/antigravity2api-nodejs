@@ -1435,7 +1435,8 @@ class GeminiCliTokenManager {
           email: token.email || null,
           projectId: token.projectId || null,
           tier: token.tier || 'pro',
-          quota: quotaSummary
+          quota: quotaSummary,
+          cooldowns: tokenCooldownManager.getAllCooldowns()[tokenId] || null
         };
       });
     } catch (error) {

@@ -187,6 +187,33 @@ function renderGeminiCliQuota(quota) {
         </div>`;
 }
 
+// 渲染 Gemini CLI Token 模型冷却状态
+function renderGeminiCliCooldowns(cooldowns) {
+    if (!cooldowns || typeof cooldowns !== 'object') return '';
+
+    const now = Date.now();
+    const badges = Object.entries(cooldowns)
+        .filter(([_, data]) => data && data.until && data.until > now)
+        .map(([group, data]) => {
+            const remaining = data.until - now;
+            const hours = Math.floor(remaining / 3600000);
+            const mins = Math.floor((remaining % 3600000) / 60000);
+            const timeStr = hours > 0 ? `${hours}h${String(mins).padStart(2, '0')}m` : `${mins}m`;
+            return `<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;font-weight:600;color:#fff;background:#e53935;margin:1px 2px;white-space:nowrap;" title="冷却中，预计 ${new Date(data.until).toLocaleString('zh-CN')} 恢复">⏳ ${group}: ${timeStr}</span>`;
+        }).join('');
+
+    if (!badges) return '';
+    return `
+        <div style="padding:4px 0;border-top:1px solid rgba(255,255,255,0.06);">
+            <div style="display:flex;align-items:center;margin-bottom:2px;">
+                <span style="font-size:0.7rem;opacity:0.6;">🔒 模型冷却</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:2px;">
+                ${badges}
+            </div>
+        </div>`;
+}
+
 // 渲染 Gemini CLI Token 列表
 function renderGeminiCliTokens(tokens) {
     cachedGeminiCliTokens = tokens;
@@ -262,6 +289,7 @@ function renderGeminiCliTokens(tokens) {
                     </span>
                 </div>
                 ${renderGeminiCliQuota(token.quota)}
+                ${renderGeminiCliCooldowns(token.cooldowns)}
             </div>
             <div class="token-id-row" title="Token ID: ${escapeHtml(tokenId)}">
                 <span class="token-id-label">🔑</span>
