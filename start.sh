@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 echo "========================================"
 echo "Antigravity2API 启动脚本"
