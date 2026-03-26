@@ -12,9 +12,6 @@ import tokenManager from '../auth/token_manager.js';
 import quotaManager from '../auth/quota_manager.js';
 import { getGroupKey } from '../utils/modelGroups.js';
 
-// "Resource has been exhausted (e.g. check quota)." 无 resetTimestamp 时的默认冷却时间
-const RESOURCE_EXHAUSTED_FALLBACK_HOURS = 12;
-
 // ==================== 心跳机制（防止 CF 超时） ====================
 const HEARTBEAT_INTERVAL = config.server.heartbeatInterval || DEFAULT_HEARTBEAT_INTERVAL;
 const SSE_HEARTBEAT = Buffer.from(': heartbeat\n\n');
@@ -400,23 +397,19 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
           }
         }
 
-        // 12h 硬冷却: "Resource has been exhausted (e.g. check quota)." 无 resetTimestamp
-        // 学习 gcli2api: 当 API 返回此错误但不含 quotaResetTimeStamp 时，设置 12h 默认冷却
+        // RESOURCE_EXHAUSTED 无恢复时间：仅记录警告，不设冷却锁
+        // 可能是上游资源紧缺而非真正额度耗尽，保留该凭证在轮询池中
+        // 报错正常抛出，下次请求轮询自然切换到下一个凭证
         if (status === 429 && tokenId && modelId && explicitDelayMs === null) {
           const body = extractUpstreamErrorBody(error);
           const inner = (body && typeof body === 'object') ? (body.error || body) : null;
           const msg = inner?.message || '';
           if (msg.includes('Resource has been exhausted') || inner?.status === 'RESOURCE_EXHAUSTED') {
-            const fallbackMs = RESOURCE_EXHAUSTED_FALLBACK_HOURS * 3600 * 1000;
-            const resetTimestamp = Date.now() + fallbackMs;
             const groupKey = getGroupKey(modelId);
-            const resetDate = new Date(resetTimestamp);
             logger.warn(
               `${loggerPrefix}收到 RESOURCE_EXHAUSTED 无恢复时间，` +
-              `设置 ${RESOURCE_EXHAUSTED_FALLBACK_HOURS}h 默认冷却，` +
-              `禁用 ${groupKey} 系列直到 ${resetDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`
+              `${groupKey} 系列可能额度紧缺，不设冷却锁，正常轮换到下一个凭证`
             );
-            tokenCooldownManager.setCooldown(tokenId, modelId, resetTimestamp);
             throw error;
           }
         }
