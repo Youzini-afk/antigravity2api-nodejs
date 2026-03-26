@@ -43,7 +43,7 @@ function buildHeaders(token) {
   const geminicliConfig = config.geminicli?.api || {};
   return {
     'Host': geminicliConfig.host || 'cloudcode-pa.googleapis.com',
-    'User-Agent': geminicliConfig.userAgent || 'GeminiCLI/0.1.5 (Windows; AMD64)',
+    'User-Agent': geminicliConfig.userAgent || 'GeminiCLI/0.34.0 (Windows; AMD64)',
     'Authorization': `Bearer ${token.access_token}`,
     'Content-Type': 'application/json',
     'Accept-Encoding': 'gzip'

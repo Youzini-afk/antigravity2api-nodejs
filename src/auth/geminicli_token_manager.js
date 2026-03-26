@@ -19,7 +19,7 @@ import { getGroupKey } from '../utils/modelGroups.js';
 // Gemini CLI API 配置
 const GEMINICLI_API_CONFIG = {
   HOST: 'cloudcode-pa.googleapis.com',
-  USER_AGENT: 'GeminiCLI/0.1.5 (Windows; AMD64)',
+  USER_AGENT: 'GeminiCLI/0.34.0 (Windows; AMD64)',
   BASE_URL: 'https://cloudcode-pa.googleapis.com'
 };
 
