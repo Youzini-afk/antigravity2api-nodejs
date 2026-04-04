@@ -7,7 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import path from 'path';
-import { closeRequester } from '../api/client.js';
+import requesterManager from '../utils/requesterManager.js';
 import logger from '../utils/logger.js';
 import logWsServer from '../utils/logWsServer.js';
 import config, { checkAndUpdateVersion } from '../config/config.js';
@@ -251,7 +251,7 @@ const shutdown = () => {
   logger.info('已停止内存管理器');
 
   // 关闭子进程请求器
-  closeRequester();
+  requesterManager.close();
   logger.info('已关闭子进程请求器');
 
   // 清理对象池

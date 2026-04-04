@@ -17,7 +17,7 @@ import {
 } from './debugDump.js';
 import { getUpstreamStatus, readUpstreamErrorBody, isCallerDoesNotHavePermission } from './upstreamError.js';
 import { createStreamLineProcessor } from './streamLineProcessor.js';
-import { runAxiosSseStream, postJsonAndParse } from './geminiTransport.js';
+import { runSseStream, postJsonAndParse } from './geminiTransport.js';
 import { parseGeminiCandidateParts, toOpenAIUsage } from './geminiResponseParser.js';
 
 // ==================== 调试：复用 client.js 的调试日志实现 ====================
@@ -144,11 +144,10 @@ export async function generateStreamResponse(requestBody, token, model, callback
   });
   
   try {
-    await runAxiosSseStream({
+    await runSseStream({
       url,
       headers,
-      data: fullRequestBody,
-      timeout: config.timeout,
+      body: fullRequestBody,
       processor
     });
     
@@ -187,11 +186,9 @@ export async function generateNoStreamResponse(requestBody, token, model) {
   let data;
   try {
     data = await postJsonAndParse({
-      useAxios: true,
       url,
       headers,
       body: fullRequestBody,
-      timeout: config.timeout,
       dumpId,
       dumpFinalRawResponse
     });

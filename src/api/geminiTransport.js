@@ -1,28 +1,15 @@
-import { httpRequest, httpStreamRequest } from '../utils/httpClient.js';
+import requesterManager from '../utils/requesterManager.js';
 
-export async function runAxiosSseStream({ url, headers, data, timeout, processor } = {}) {
-  const response = await httpStreamRequest({
-    method: 'POST',
-    url,
-    headers,
-    data,
-    timeout
-  });
+/**
+ * 统一流式 SSE 请求（TLS 指纹 / axios 均通过 requesterManager 路由）
+ *
+ * streamResponse 实现 onStart/onData/onEnd/onError 链式接口
+ * （TLS 路径返回 src/requester.js StreamResponse，
+ *  axios 路径返回 requesterManager 内部的 AxiosStreamResponse）
+ */
+export async function runSseStream({ url, method = 'POST', headers, body, processor, onErrorChunk } = {}) {
+  const streamResponse = await requesterManager.fetchStream(url, { method, headers, body });
 
-  response.data.on('data', (chunk) => {
-    processor.processChunk(chunk);
-  });
-
-  await new Promise((resolve, reject) => {
-    response.data.on('end', () => {
-      processor.close();
-      resolve();
-    });
-    response.data.on('error', reject);
-  });
-}
-
-export async function runNativeSseStream({ streamResponse, processor, onErrorChunk } = {}) {
   let errorBody = '';
   let statusCode = null;
 
@@ -51,54 +38,37 @@ export async function runNativeSseStream({ streamResponse, processor, onErrorChu
   });
 }
 
+/**
+ * 发送 JSON 请求并解析响应（非流式）
+ *
+ * @param {object} options
+ * @param {string}   options.url
+ * @param {object}   options.headers
+ * @param {*}        options.body
+ * @param {string}   [options.dumpId]
+ * @param {Function} [options.dumpFinalRawResponse]
+ * @param {string}   [options.rawFormat='json']
+ * @returns {Promise<any>} 解析后的 JSON 数据
+ */
 export async function postJsonAndParse({
-  useAxios,
-  requester,
   url,
   headers,
   body,
-  timeout,
-  requesterConfig,
   dumpId,
   dumpFinalRawResponse,
-  rawFormat = 'json'
+  rawFormat = 'json',
 } = {}) {
-  if (useAxios) {
-    if (dumpId) {
-      const resp = await httpRequest({
-        method: 'POST',
-        url,
-        headers,
-        data: body,
-        timeout,
-        responseType: 'text'
-      });
-      const rawText = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data, null, 2);
-      await dumpFinalRawResponse(dumpId, rawText, rawFormat);
-      return JSON.parse(rawText);
-    }
+  const { data } = await requesterManager.fetch(url, {
+    method: 'POST',
+    headers,
+    body,
+  });
 
-    return (await httpRequest({
-      method: 'POST',
-      url,
-      headers,
-      data: body,
-      timeout
-    })).data;
+  if (dumpId) {
+    const rawText = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    await dumpFinalRawResponse(dumpId, rawText, rawFormat);
+    return typeof data === 'string' ? JSON.parse(data) : data;
   }
 
-  if (!requester) {
-    throw new Error('native requester is required when useAxios=false');
-  }
-
-  const response = await requester.antigravity_fetch(url, requesterConfig);
-  if (response.status !== 200) {
-    const errorBody = await response.text();
-    if (dumpId) await dumpFinalRawResponse(dumpId, errorBody, 'txt');
-    throw { status: response.status, message: errorBody };
-  }
-
-  const rawText = await response.text();
-  if (dumpId) await dumpFinalRawResponse(dumpId, rawText, rawFormat);
-  return JSON.parse(rawText);
+  return data;
 }
