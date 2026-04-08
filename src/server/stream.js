@@ -10,6 +10,7 @@ import { DEFAULT_HEARTBEAT_INTERVAL, LONG_COOLDOWN_THRESHOLD } from '../constant
 import tokenCooldownManager from '../auth/token_cooldown_manager.js';
 import quotaManager from '../auth/quota_manager.js';
 import { getGroupKey } from '../utils/modelGroups.js';
+import { hasOtherAvailableModelGroups, getAvailableModelGroups } from '../utils/tokenQuotaHelper.js';
 
 // ==================== 心跳机制（防止 CF 超时） ====================
 const HEARTBEAT_INTERVAL = config.server.heartbeatInterval || DEFAULT_HEARTBEAT_INTERVAL;
@@ -307,6 +308,8 @@ function isRetryableError(status, error) {
  * @param {string} options.tokenId - Token ID（用于模型系列禁用）
  * @param {string} options.modelId - 模型 ID（用于模型系列禁用）
  * @param {Function} options.refreshQuota - 刷新额度的回调函数（当需要获取准确恢复时间时调用）
+ * @param {Object} options.tokenManager - TokenManager 实例（新增）
+ * @param {Object} options.token - Token 对象（新增）
  * @returns {Promise<any>}
  */
 export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt = null) {
@@ -316,6 +319,8 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
   let tokenId = null;
   let modelId = null;
   let refreshQuota = null;
+  let tokenManager = null;
+  let token = null;
 
   if (typeof options === 'string') {
     // 旧版调用方式
@@ -327,6 +332,8 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
     tokenId = options.tokenId || null;
     modelId = options.modelId || null;
     refreshQuota = options.refreshQuota || null;
+    tokenManager = options.tokenManager || null;
+    token = options.token || null;
   }
 
   const retries = Number.isFinite(maxRetries) && maxRetries > 0 ? Math.floor(maxRetries) : 0;
@@ -385,12 +392,41 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
             const groupKey = getGroupKey(modelId);
             const resetDate = new Date(finalResetTimestamp);
             const delayMinutes = Math.round((finalResetTimestamp - Date.now()) / 1000 / 60);
-          logger.warn(
-            `${loggerPrefix}收到 ${errorType}，恢复时间 ${delayMinutes} 分钟后，` +
+            
+            logger.warn(
+              `${loggerPrefix}收到 ${errorType}，恢复时间 ${delayMinutes} 分钟后，` +
               `超过阈值(${Math.round(cooldownThreshold / 1000 / 60)}分钟)，` +
               `禁用 ${groupKey} 系列直到 ${resetDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`
             );
+            
+            // 1. 设置模型组级冷却
             tokenCooldownManager.setCooldown(tokenId, modelId, finalResetTimestamp);
+            
+            // 2. 检查是否所有模型组都被禁用（新增）
+            const hasOtherModels = hasOtherAvailableModelGroups(tokenId);
+            
+            if (!hasOtherModels) {
+              // 3. 所有模型组都不可用，标记整个 token 配额耗尽（新增）
+              logger.warn(
+                `${loggerPrefix}Token ${tokenId} 的所有核心模型组都已禁用，标记为配额耗尽`
+              );
+              
+              // 获取 token 对象并标记配额耗尽
+              if (tokenManager && token) {
+                try {
+                  await tokenManager.markTokenQuotaExhausted(token);
+                } catch (e) {
+                  logger.error(`${loggerPrefix}标记 token 配额耗尽失败: ${e.message}`);
+                }
+              }
+            } else {
+              // 4. 还有其他可用模型组，记录信息（新增）
+              const availableGroups = getAvailableModelGroups(tokenId);
+              logger.info(
+                `${loggerPrefix}Token ${tokenId} 仍有其他可用模型组: ${availableGroups.join(', ')}`
+              );
+            }
+            
             // 不重试，直接抛出错误
             throw error;
           }

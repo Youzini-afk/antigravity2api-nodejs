@@ -65,7 +65,9 @@ export const handleOpenAIRequest = async (req, res) => {
       onAttempt: () => tokenManager.recordRequest(token, model),
       tokenId,
       modelId: model,
-      refreshQuota
+      refreshQuota,
+      tokenManager,  // 新增
+      token          // 新增
     });
 
     const isImageModel = model.includes('-image');

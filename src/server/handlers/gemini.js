@@ -130,7 +130,9 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
       onAttempt: () => tokenManager.recordRequest(token, modelName),
       tokenId,
       modelId: modelName,
-      refreshQuota
+      refreshQuota,
+      tokenManager,  // 新增
+      token          // 新增
     });
 
     const isImageModel = modelName.includes('-image');
