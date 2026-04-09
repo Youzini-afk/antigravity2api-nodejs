@@ -29,6 +29,11 @@ const _P = {
 };
 
 // ==================== Antigravity OAuth 配置 ====================
+export const AUTH_MODES = Object.freeze({
+  ANTIGRAVITY: 'antigravity',
+  GEMINICLI: 'geminicli'
+});
+
 export const OAUTH_CONFIG = {
   CLIENT_ID: process.env.ANTIGRAVITY_CLIENT_ID || j(_P.A1, _P.A2, _P.A3),
   CLIENT_SECRET: process.env.ANTIGRAVITY_CLIENT_SECRET || j(_P.AS1, _P.AS2, _P.AS3, _P.AS4),

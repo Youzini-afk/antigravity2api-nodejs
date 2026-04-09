@@ -311,6 +311,7 @@ function isRetryableError(status, error) {
  * @param {Function} options.refreshQuota - 刷新额度的回调函数（当需要获取准确恢复时间时调用）
  * @param {Object} options.tokenManager - TokenManager 实例（新增）
  * @param {Object} options.token - Token 对象（新增）
+ * @param {Function} options.acquireRetryToken - 切换到下一个凭证的回调（可选）
  * @returns {Promise<any>}
  */
 export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt = null) {
@@ -322,6 +323,7 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
   let refreshQuota = null;
   let tokenManagerRef = defaultTokenManager;
   let token = null;
+  let acquireRetryToken = null;
 
   if (typeof options === 'string') {
     // 旧版调用方式
@@ -335,6 +337,7 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
     refreshQuota = options.refreshQuota || null;
     tokenManagerRef = options.tokenManager || defaultTokenManager;
     token = options.token || null;
+    acquireRetryToken = options.acquireRetryToken || null;
   }
 
   const retries = Number.isFinite(maxRetries) && maxRetries > 0 ? Math.floor(maxRetries) : 0;
@@ -350,6 +353,21 @@ export async function with429Retry(fn, maxRetries, options = {}, legacyOnAttempt
       }
       return await fn(attempt);
     } catch (error) {
+      if (error?.isRetryableWithNextToken === true && typeof acquireRetryToken === 'function' && attempt < retries) {
+        const nextAttempt = attempt + 1;
+        try {
+          const switchedToken = await acquireRetryToken(error, nextAttempt);
+          if (switchedToken) {
+            logger.warn(`${loggerPrefix}${error.message || '当前凭证不可用'}，切换下一凭证后进行第 ${nextAttempt} 次重试（共 ${retries} 次）`);
+            attempt = nextAttempt;
+            token = switchedToken;
+            continue;
+          }
+        } catch (switchError) {
+          logger.warn(`${loggerPrefix}切换下一凭证失败: ${switchError.message}`);
+        }
+      }
+
       // 兼容多种错误格式：error.status, error.statusCode, error.response?.status
       const status = Number(error.status || error.statusCode || error.response?.status);
 

@@ -4,6 +4,7 @@ import { getModelsWithQuotas } from "../api/client.js";
 import geminicliTokenManager from "../auth/geminicli_token_manager.js";
 import { generateToken, verifyToken } from "../auth/jwt.js";
 import oauthManager from "../auth/oauth_manager.js";
+import { AUTH_MODES } from "../constants/oauth.js";
 import quotaManager from "../auth/quota_manager.js";
 import tokenManager from "../auth/token_manager.js";
 import config, { getConfigJson, saveConfigJson } from "../config/config.js";
@@ -15,10 +16,59 @@ import logger from "../utils/logger.js";
 import memoryManager from "../utils/memoryManager.js";
 import { getEnvPath } from "../utils/paths.js";
 import { generateTokenId } from "../utils/idGenerator.js";
+import { randomUUID } from "crypto";
 
 const envPath = getEnvPath();
+const GEMINICLI_OAUTH_SESSION_TTL_MS = 30 * 60 * 1000;
+const GEMINICLI_OAUTH_SESSION_LIMIT = 50;
+const geminiCliOAuthSessions = new Map();
 
 const router = express.Router();
+
+function cleanupGeminiCliOAuthSessions() {
+  const now = Date.now();
+  for (const [state, session] of geminiCliOAuthSessions.entries()) {
+    if (!session || now - session.createdAt > GEMINICLI_OAUTH_SESSION_TTL_MS) {
+      geminiCliOAuthSessions.delete(state);
+    }
+  }
+
+  while (geminiCliOAuthSessions.size > GEMINICLI_OAUTH_SESSION_LIMIT) {
+    const oldestKey = geminiCliOAuthSessions.keys().next().value;
+    if (!oldestKey) break;
+    geminiCliOAuthSessions.delete(oldestKey);
+  }
+}
+
+function createGeminiCliOAuthSession() {
+  cleanupGeminiCliOAuthSessions();
+  const port = Math.floor(Math.random() * 10000) + 50000;
+  const state = `geminicli_${randomUUID()}`;
+  const authUrl = oauthManager.generateAuthUrl(port, AUTH_MODES.GEMINICLI, state);
+  geminiCliOAuthSessions.set(state, { port, createdAt: Date.now() });
+  return { authUrl, state, port };
+}
+
+function parseGeminiCliCallbackPayload(body = {}) {
+  const callbackUrl = typeof body.callbackUrl === "string" ? body.callbackUrl.trim() : "";
+  if (callbackUrl) {
+    try {
+      const parsed = new URL(callbackUrl);
+      const code = parsed.searchParams.get("code");
+      const state = parsed.searchParams.get("state");
+      const port =
+        parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+      return { code, state, port: Number(port), callbackUrl };
+    } catch {
+      return { code: "", state: "", port: NaN, callbackUrl };
+    }
+  }
+
+  const code = typeof body.code === "string" ? body.code.trim() : "";
+  const state = typeof body.state === "string" ? body.state.trim() : "";
+  const port = Number(body.port);
+  return { code, state, port, callbackUrl: "" };
+}
 
 // 禁用缓存中间件，确保管理后台数据实时性
 router.use((req, res, next) => {
@@ -927,16 +977,67 @@ router.post("/tokens/import", cookieAuthMiddleware, async (req, res) => {
   }
 });
 
+router.post("/geminicli/oauth/start", cookieAuthMiddleware, async (req, res) => {
+  try {
+    const session = createGeminiCliOAuthSession();
+    res.json({
+      success: true,
+      data: session,
+    });
+  } catch (error) {
+    logger.error("[GeminiCLI] 创建 OAuth 会话失败:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post("/geminicli/oauth/exchange", cookieAuthMiddleware, async (req, res) => {
+  const { code, state, port } = parseGeminiCliCallbackPayload(req.body || {});
+  if (!code || !state || !Number.isFinite(port) || port <= 0) {
+    return res.status(400).json({ success: false, message: "callbackUrl 或 code/state/port 参数无效" });
+  }
+
+  const session = geminiCliOAuthSessions.get(state);
+  if (!session) {
+    return res.status(400).json({ success: false, message: "OAuth 会话不存在或已过期，请重新发起授权" });
+  }
+  if (session.port !== port) {
+    return res.status(400).json({ success: false, message: "回调端口与已创建的 OAuth 会话不匹配" });
+  }
+
+  try {
+    const account = await oauthManager.authenticate(code, port, AUTH_MODES.GEMINICLI);
+    const result = await geminicliTokenManager.addToken(account, {
+      source: AUTH_MODES.GEMINICLI,
+      attemptRepair: true,
+    });
+    geminiCliOAuthSessions.delete(state);
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.json({
+      success: true,
+      data: result.data,
+      message: result.message,
+    });
+  } catch (error) {
+    logger.error("[GeminiCLI] OAuth 交换失败:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 router.post("/oauth/exchange", cookieAuthMiddleware, async (req, res) => {
-  const { code, port, mode = "antigravity" } = req.body;
+  const { code, port, mode = AUTH_MODES.ANTIGRAVITY } = req.body;
+  const normalizedMode = oauthManager.normalizeMode(mode);
   if (!code || !port) {
     return res.status(400).json({ success: false, message: "code和port必填" });
   }
 
   try {
-    const account = await oauthManager.authenticate(code, port, mode);
+    const account = await oauthManager.authenticate(code, port, normalizedMode);
 
-    if (mode === "geminicli") {
+    if (normalizedMode === AUTH_MODES.GEMINICLI) {
       // Gemini CLI 模式
       res.json({
         success: true,
@@ -956,7 +1057,7 @@ router.post("/oauth/exchange", cookieAuthMiddleware, async (req, res) => {
       });
     }
   } catch (error) {
-    logger.error(`[${mode}] 认证失败:`, error.message);
+    logger.error(`[${normalizedMode}] 认证失败:`, error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -1338,19 +1439,27 @@ router.get("/geminicli/tokens", cookieAuthMiddleware, async (req, res) => {
 router.post("/geminicli/tokens", cookieAuthMiddleware, async (req, res) => {
   const {
     access_token,
+    token,
     refresh_token,
     expires_in,
     timestamp,
     enable,
     email,
     projectId,
+    project_id,
+    expiry,
+    expires_at,
+    tier,
+    preview,
+    previewCapability,
     useThreshold,
     allowBypassWithSpecialKey,
   } = req.body;
-  if (!access_token || !refresh_token) {
+  const resolvedAccessToken = access_token || token;
+  if (!resolvedAccessToken || !refresh_token) {
     return res
       .status(400)
-      .json({ success: false, message: "access_token和refresh_token必填" });
+      .json({ success: false, message: "access_token/token 和 refresh_token 必填" });
   }
   const useThresholdErr = validateOptionalBoolean(useThreshold, "useThreshold");
   if (useThresholdErr) {
@@ -1363,18 +1472,27 @@ router.post("/geminicli/tokens", cookieAuthMiddleware, async (req, res) => {
   if (allowBypassErr) {
     return res.status(400).json({ success: false, message: allowBypassErr });
   }
-  const tokenData = { access_token, refresh_token, expires_in };
+  const tokenData = { access_token: resolvedAccessToken, refresh_token, expires_in };
   if (timestamp) tokenData.timestamp = timestamp;
   if (enable !== undefined) tokenData.enable = enable;
   if (email) tokenData.email = email;
   if (projectId) tokenData.projectId = projectId;
+  if (project_id) tokenData.project_id = project_id;
+  if (expiry) tokenData.expiry = expiry;
+  if (expires_at) tokenData.expires_at = expires_at;
+  if (tier) tokenData.tier = tier;
+  if (preview !== undefined) tokenData.preview = preview;
+  if (previewCapability !== undefined) tokenData.previewCapability = previewCapability;
   if (useThreshold !== undefined) tokenData.useThreshold = useThreshold;
   if (allowBypassWithSpecialKey !== undefined)
     tokenData.allowBypassWithSpecialKey = allowBypassWithSpecialKey;
 
   try {
-    const result = await geminicliTokenManager.addToken(tokenData);
-    logger.info(`[GeminiCLI] 添加新Token: ${access_token.substring(0, 8)}...`);
+    const result = await geminicliTokenManager.addToken(tokenData, {
+      source: "manual",
+      attemptRepair: true,
+    });
+    logger.info(`[GeminiCLI] 添加新Token: ${resolvedAccessToken.substring(0, 8)}...`);
     res.json(result);
   } catch (error) {
     logger.error("[GeminiCLI] 添加Token失败:", error.message);
@@ -1476,20 +1594,43 @@ router.post(
 
 // 手动获取指定 Gemini CLI Token 的 Project ID
 router.post(
+  "/geminicli/tokens/:tokenId/repair",
+  cookieAuthMiddleware,
+  async (req, res) => {
+    const { tokenId } = req.params;
+    try {
+      const result = await geminicliTokenManager.repairTokenById(tokenId, "manual_repair");
+      logger.info(`[GeminiCLI] 手动修复Token: ${tokenId} -> ${result.status}`);
+      res.json({
+        success: result.status === "ready",
+        message: result.status === "ready" ? "Token 修复成功" : "Token 仍处于待修复状态",
+        data: result,
+        projectId: result.projectId || null,
+      });
+    } catch (error) {
+      logger.error("[GeminiCLI] 修复Token失败:", error.message);
+      const status = error.statusCode || 500;
+      res.status(status).json({ success: false, message: error.message });
+    }
+  },
+);
+
+// 兼容旧接口：内部走统一 repair 流程
+router.post(
   "/geminicli/tokens/:tokenId/fetch-project-id",
   cookieAuthMiddleware,
   async (req, res) => {
     const { tokenId } = req.params;
     try {
-      const result =
-        await geminicliTokenManager.fetchProjectIdForToken(tokenId);
+      const result = await geminicliTokenManager.repairTokenById(tokenId, "manual_project_id");
       logger.info(
-        `[GeminiCLI] 手动获取ProjectId: ${tokenId} -> ${result.projectId}`,
+        `[GeminiCLI] 手动修复/获取ProjectId: ${tokenId} -> ${result.projectId || "pending"}`,
       );
       res.json({
-        success: true,
-        message: "Project ID获取成功",
-        projectId: result.projectId,
+        success: result.status === "ready",
+        message: result.status === "ready" ? "Project ID获取成功" : "Token 仍处于待修复状态",
+        projectId: result.projectId || null,
+        data: result,
       });
     } catch (error) {
       logger.error("[GeminiCLI] 获取ProjectId失败:", error.message);
@@ -1552,6 +1693,13 @@ router.post(
           enable: token.enable,
           email: token.email,
           projectId: token.projectId,
+          status: token.status,
+          pendingStage: token.pendingStage,
+          lastError: token.lastError,
+          lastAttemptAt: token.lastAttemptAt,
+          repairCount: token.repairCount,
+          tier: token.tier,
+          previewCapability: token.previewCapability,
         },
       });
     } catch (error) {
@@ -1587,6 +1735,13 @@ router.post(
           enable: token.enable,
           email: token.email,
           projectId: token.projectId,
+          status: token.status,
+          pendingStage: token.pendingStage,
+          lastError: token.lastError,
+          lastAttemptAt: token.lastAttemptAt,
+          repairCount: token.repairCount,
+          tier: token.tier,
+          previewCapability: token.previewCapability,
           useThreshold: token.useThreshold !== false,
           allowBypassWithSpecialKey: token.allowBypassWithSpecialKey !== false,
         })),
@@ -1620,43 +1775,30 @@ router.post(
     }
 
     try {
-      const importTokens = importList;
       let addedCount = 0;
       let skippedCount = 0;
       let updatedCount = 0;
-
-      const parsedTokens = [];
-      for (const rawToken of importTokens) {
-        const parsed = smartParseGeminiCliToken(rawToken);
-        if (parsed) parsedTokens.push(parsed);
-        else skippedCount++;
-      }
+      const importTokens = importList;
 
       if (mode === "replace") {
-        await geminicliTokenManager.store.writeAll(parsedTokens);
-        addedCount = parsedTokens.length;
-      } else {
-        const existingTokens = await geminicliTokenManager.store.readAll();
-        const existingRefreshTokens = new Set(
-          existingTokens.map((t) => t.refresh_token),
-        );
+        await geminicliTokenManager.store.writeAll([]);
+      }
 
-        for (const token of parsedTokens) {
-          if (existingRefreshTokens.has(token.refresh_token)) {
-            const index = existingTokens.findIndex(
-              (t) => t.refresh_token === token.refresh_token,
-            );
-            if (index !== -1) {
-              existingTokens[index] = { ...existingTokens[index], ...token };
-              updatedCount++;
-            }
-          } else {
-            existingTokens.push(token);
-            addedCount++;
-          }
+      for (const rawToken of importTokens) {
+        const result = await geminicliTokenManager.addToken(rawToken, {
+          reload: false,
+          source: "import",
+          attemptRepair: true,
+        });
+        if (!result.success) {
+          skippedCount++;
+          continue;
         }
-
-        await geminicliTokenManager.store.writeAll(existingTokens);
+        if (result.data?.operation === "updated") {
+          updatedCount++;
+        } else {
+          addedCount++;
+        }
       }
 
       await geminicliTokenManager.reload();

@@ -38,6 +38,116 @@ function mapRawTier(rawTier) {
   return TIER_MAP[rawTier.toLowerCase()] || 'pro';
 }
 
+export const GEMINICLI_TOKEN_STATUS = Object.freeze({
+  READY: 'ready',
+  PENDING: 'pending',
+  INVALID: 'invalid'
+});
+
+export const GEMINICLI_PENDING_STAGE = Object.freeze({
+  OAUTH_EXCHANGED: 'oauth_exchanged',
+  PROJECT_ID: 'project_id',
+  ENABLE_APIS: 'enable_apis',
+  PREVIEW_PROBE: 'preview_probe'
+});
+
+export const GEMINICLI_PREVIEW_CAPABILITY = Object.freeze({
+  UNKNOWN: 'unknown',
+  SUPPORTED: 'supported',
+  UNSUPPORTED: 'unsupported'
+});
+
+const GEMINICLI_PENDING_STAGES = new Set(Object.values(GEMINICLI_PENDING_STAGE));
+const GEMINICLI_TOKEN_STATUSES = new Set(Object.values(GEMINICLI_TOKEN_STATUS));
+const GEMINICLI_PREVIEW_CAPABILITIES = new Set(Object.values(GEMINICLI_PREVIEW_CAPABILITY));
+const GEMINICLI_REQUIRED_SERVICES = Object.freeze([
+  'geminicloudassist.googleapis.com',
+  'cloudaicompanion.googleapis.com',
+]);
+const GEMINICLI_PREVIEW_PROBE_MODEL = 'gemini-3-flash-preview';
+
+function normalizeTier(value, fallback = 'pro') {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'ultra' || normalized === 'pro' || normalized === 'free') {
+    return normalized;
+  }
+  return fallback;
+}
+
+function normalizeStatus(value, fallback = GEMINICLI_TOKEN_STATUS.PENDING) {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  return GEMINICLI_TOKEN_STATUSES.has(normalized) ? normalized : fallback;
+}
+
+function normalizePendingStageValue(value, fallback = null) {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  return GEMINICLI_PENDING_STAGES.has(normalized) ? normalized : fallback;
+}
+
+function normalizePreviewCapability(value, fallback = GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN) {
+  if (typeof value === 'boolean') {
+    return value ? GEMINICLI_PREVIEW_CAPABILITY.SUPPORTED : GEMINICLI_PREVIEW_CAPABILITY.UNSUPPORTED;
+  }
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  return GEMINICLI_PREVIEW_CAPABILITIES.has(normalized) ? normalized : fallback;
+}
+
+function normalizeLastAttemptAt(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function normalizeRepairCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return 0;
+  return Math.floor(count);
+}
+
+function normalizeTokenErrorMessage(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function deriveStoredStatus(token) {
+  const explicitStatus = normalizeStatus(token?.status, null);
+  if (explicitStatus) {
+    if (explicitStatus === GEMINICLI_TOKEN_STATUS.READY && !token?.projectId) {
+      return GEMINICLI_TOKEN_STATUS.PENDING;
+    }
+    return explicitStatus;
+  }
+  if (token?.projectId) return GEMINICLI_TOKEN_STATUS.READY;
+  return GEMINICLI_TOKEN_STATUS.PENDING;
+}
+
+function isPreviewModelId(modelId) {
+  return typeof modelId === 'string' && modelId.toLowerCase().includes('preview');
+}
+
+function buildPreviewProbeUrl(geminicliConfig = {}) {
+  return geminicliConfig.noStreamUrl || 'https://cloudcode-pa.googleapis.com/v1internal:generateContent';
+}
+
+function normalizeBooleanLike(value) {
+  if (value === true || value === 1 || value === '1') return true;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+    if (normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  }
+  if (value === false || value === 0 || value === '0') return false;
+  return undefined;
+}
+
 // 轮询策略枚举（复用 token_manager.js 的定义）
 const RotationStrategy = {
   ROUND_ROBIN: 'round_robin',           // 均衡负载：每次请求切换
@@ -133,16 +243,152 @@ class GeminiCliTokenManager {
     this._initPromise = null;
   }
 
+  _normalizeStoredToken(token) {
+    const normalized = GeminiCliTokenManager.normalizeCredentialFormat(token);
+    const status = deriveStoredStatus(normalized);
+    const pendingStage = status === GEMINICLI_TOKEN_STATUS.PENDING
+      ? normalizePendingStageValue(
+        normalized.pendingStage,
+        normalized.projectId ? GEMINICLI_PENDING_STAGE.ENABLE_APIS : GEMINICLI_PENDING_STAGE.PROJECT_ID
+      )
+      : null;
+
+    return {
+      ...normalized,
+      ...normalizeTokenThresholdControl(normalized),
+      enable: normalized.enable !== false,
+      hasQuota: normalized.hasQuota !== false,
+      tier: normalizeTier(normalized.tier, 'pro'),
+      status,
+      pendingStage,
+      lastError: normalizeTokenErrorMessage(normalized.lastError),
+      lastAttemptAt: normalizeLastAttemptAt(normalized.lastAttemptAt),
+      repairCount: normalizeRepairCount(normalized.repairCount),
+      previewCapability: normalizePreviewCapability(
+        normalized.previewCapability ?? normalized.preview,
+        GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN
+      )
+    };
+  }
+
+  async _loadNormalizedTokens() {
+    const rawTokens = await this.store.readAll();
+    const normalizedTokens = rawTokens.map((token) => this._normalizeStoredToken(token));
+    const changed = JSON.stringify(rawTokens) !== JSON.stringify(normalizedTokens);
+    if (changed) {
+      await this.store.writeAll(normalizedTokens);
+    }
+    return normalizedTokens;
+  }
+
+  _isReadyToken(token) {
+    return token?.enable !== false && token?.status === GEMINICLI_TOKEN_STATUS.READY;
+  }
+
+  _shouldAutoRepairToken(token) {
+    return token?.enable !== false && token?.status === GEMINICLI_TOKEN_STATUS.PENDING;
+  }
+
+  _getPreviewPriority(token, modelId) {
+    const capability = normalizePreviewCapability(token?.previewCapability, GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN);
+    if (isPreviewModelId(modelId)) {
+      if (capability === GEMINICLI_PREVIEW_CAPABILITY.SUPPORTED) return 0;
+      if (capability === GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN) return 1;
+      return 2;
+    }
+
+    if (capability === GEMINICLI_PREVIEW_CAPABILITY.UNSUPPORTED) return 0;
+    if (capability === GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN) return 1;
+    return 2;
+  }
+
+  _buildOrderedCandidateIndices(indices, modelId) {
+    return indices
+      .map((tokenIndex, order) => ({
+        tokenIndex,
+        order,
+        priority: this._getPreviewPriority(this.tokens[tokenIndex], modelId)
+      }))
+      .sort((a, b) => a.priority - b.priority || a.order - b.order)
+      .map((item) => item.tokenIndex);
+  }
+
+  async _persistTokenRecord(token) {
+    const allTokens = await this.store.readAll();
+    const salt = await this.store.getSalt();
+    const tokenId = generateTokenId(token.refresh_token, salt);
+    const index = allTokens.findIndex((entry) =>
+      generateTokenId(entry.refresh_token, salt) === tokenId
+    );
+    if (index !== -1) {
+      allTokens[index] = { ...allTokens[index], ...token };
+      await this.store.writeAll(allTokens);
+    }
+  }
+
+  _applyLifecycleState(token, {
+    status,
+    pendingStage = null,
+    lastError = null,
+    lastAttemptAt = Date.now(),
+    incrementRepairCount = false
+  } = {}) {
+    if (status) token.status = normalizeStatus(status, GEMINICLI_TOKEN_STATUS.PENDING);
+    token.pendingStage = token.status === GEMINICLI_TOKEN_STATUS.PENDING
+      ? normalizePendingStageValue(pendingStage, GEMINICLI_PENDING_STAGE.PROJECT_ID)
+      : null;
+    token.lastError = normalizeTokenErrorMessage(lastError);
+    token.lastAttemptAt = normalizeLastAttemptAt(lastAttemptAt);
+    if (incrementRepairCount) {
+      token.repairCount = normalizeRepairCount(token.repairCount) + 1;
+    } else {
+      token.repairCount = normalizeRepairCount(token.repairCount);
+    }
+  }
+
+  async _markTokenReady(token, { previewCapability = null } = {}) {
+    if (previewCapability) {
+      token.previewCapability = normalizePreviewCapability(previewCapability, token.previewCapability);
+    } else {
+      token.previewCapability = normalizePreviewCapability(
+        token.previewCapability,
+        GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN
+      );
+    }
+    this._applyLifecycleState(token, {
+      status: GEMINICLI_TOKEN_STATUS.READY,
+      pendingStage: null,
+      lastError: null
+    });
+    await this._persistTokenRecord(token);
+  }
+
+  async _markTokenPending(token, stage, errorMessage) {
+    this._applyLifecycleState(token, {
+      status: GEMINICLI_TOKEN_STATUS.PENDING,
+      pendingStage: stage,
+      lastError: errorMessage
+    });
+    await this._persistTokenRecord(token);
+  }
+
+  async _markTokenInvalid(token, errorMessage) {
+    this._applyLifecycleState(token, {
+      status: GEMINICLI_TOKEN_STATUS.INVALID,
+      pendingStage: null,
+      lastError: errorMessage
+    });
+    await this._persistTokenRecord(token);
+  }
+
   async _initialize() {
     try {
       log.info('[GeminiCLI] 正在初始化token管理器...');
-      const tokenArray = await this.store.readAll();
+      const tokenArray = await this._loadNormalizedTokens();
       await this.store.getSalt();
 
-      // Gemini CLI 不需要 sessionId
       this.tokens = tokenArray.filter(token => token.enable !== false).map(token => ({
-        ...token,
-        ...normalizeTokenThresholdControl(token)
+        ...token
       }));
       this._totalTokenCount = tokenArray.length;
 
@@ -165,6 +411,7 @@ class GeminiCliTokenManager {
 
         // 并发刷新所有过期的 token
         await this._refreshExpiredTokensConcurrently();
+        await this._autoRepairPendingTokens('initialize');
       }
     } catch (error) {
       log.error('[GeminiCLI] 初始化token失败:', error.message);
@@ -175,7 +422,7 @@ class GeminiCliTokenManager {
   _rebuildAvailableQuotaTokens() {
     this.availableQuotaTokenIndices = [];
     this.tokens.forEach((token, index) => {
-      if (token.enable !== false && token.hasQuota !== false) {
+      if (this._isReadyToken(token) && token.hasQuota !== false) {
         this.availableQuotaTokenIndices.push(index);
       }
     });
@@ -379,7 +626,8 @@ class GeminiCliTokenManager {
    * 刷新 Token
    * 使用 GEMINICLI_OAUTH_CONFIG 而非 OAUTH_CONFIG
    */
-  async refreshToken(token, silent = false) {
+  async refreshToken(token, silent = false, options = {}) {
+    const { skipLifecycleRepair = false } = options;
     const salt = await this.store.getSalt();
     const tokenId = generateTokenId(token.refresh_token, salt);
     if (!silent) {
@@ -410,6 +658,12 @@ class GeminiCliTokenManager {
       token.expires_in = response.data.expires_in;
       token.timestamp = Date.now();
       this.saveToFile(token);
+      if (!skipLifecycleRepair && token.status === GEMINICLI_TOKEN_STATUS.PENDING) {
+        await this._repairTokenLifecycle(token, {
+          trigger: 'refresh',
+          incrementRepairCount: true
+        });
+      }
       return token;
     } catch (error) {
       const statusCode = error.response?.status;
@@ -630,6 +884,229 @@ class GeminiCliTokenManager {
     return null;
   }
 
+  _isPermanentRefreshFailure(error) {
+    const statusCode = error?.statusCode ?? error?.response?.status;
+    if (statusCode === 400 || statusCode === 401 || statusCode === 403) {
+      return true;
+    }
+    const message = String(error?.message || '').toLowerCase();
+    return (
+      message.includes('invalid_grant') ||
+      message.includes('refresh token') ||
+      message.includes('unauthorized_client') ||
+      message.includes('access_denied')
+    );
+  }
+
+  async _enableRequiredApis(token, projectId) {
+    const failures = [];
+    for (const service of GEMINICLI_REQUIRED_SERVICES) {
+      try {
+        const url = `https://serviceusage.googleapis.com/v1/projects/${projectId}/services/${service}:enable`;
+        await axios(buildAxiosRequestConfig({
+          method: 'POST',
+          url,
+          headers: {
+            'Authorization': `Bearer ${token.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          data: '{}',
+          timeout: 15000
+        }));
+        log.info(`[GeminiCLI] 已启用服务: ${service}`);
+      } catch (error) {
+        const status = error?.response?.status;
+        const message = typeof error?.response?.data === 'string'
+          ? error.response.data
+          : (error?.response?.data?.error?.message || error.message || '未知错误');
+        if (status === 400 && String(message).toLowerCase().includes('already enabled')) {
+          continue;
+        }
+        failures.push(`${service}: ${message}`);
+        log.warn(`[GeminiCLI] 启用服务失败 ${service}: ${message}`);
+      }
+    }
+
+    return {
+      ok: failures.length === 0,
+      error: failures.length > 0 ? failures.join(' | ') : null
+    };
+  }
+
+  async _probePreviewCapability(token) {
+    if (!token?.projectId) {
+      return {
+        capability: GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN,
+        error: '缺少 projectId，无法探测 preview 能力'
+      };
+    }
+
+    const url = buildPreviewProbeUrl(config.geminicli?.api);
+    const headers = this._buildQuotaFetchHeaders(token);
+    const requestBody = {
+      model: GEMINICLI_PREVIEW_PROBE_MODEL,
+      project: token.projectId,
+      request: {
+        contents: [{ role: 'user', parts: [{ text: 'Hi' }] }],
+        generationConfig: { maxOutputTokens: 1 }
+      }
+    };
+
+    try {
+      const response = await httpRequest({
+        method: 'POST',
+        url,
+        headers,
+        data: requestBody,
+        timeout: 20000
+      });
+
+      if (response.status === 404 || response.statusCode === 404) {
+        return {
+          capability: GEMINICLI_PREVIEW_CAPABILITY.UNSUPPORTED,
+          error: 'preview 模型返回 404'
+        };
+      }
+
+      return {
+        capability: GEMINICLI_PREVIEW_CAPABILITY.SUPPORTED,
+        error: null
+      };
+    } catch (error) {
+      const status = error?.response?.status || error?.status || error?.statusCode;
+      if (status === 404) {
+        return {
+          capability: GEMINICLI_PREVIEW_CAPABILITY.UNSUPPORTED,
+          error: 'preview 模型返回 404'
+        };
+      }
+      return {
+        capability: GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN,
+        error: error.message || 'preview 探测失败'
+      };
+    }
+  }
+
+  async _repairTokenLifecycle(token, { trigger = 'repair', incrementRepairCount = false } = {}) {
+    this._applyLifecycleState(token, {
+      status: token.status || GEMINICLI_TOKEN_STATUS.PENDING,
+      pendingStage: token.pendingStage || GEMINICLI_PENDING_STAGE.OAUTH_EXCHANGED,
+      lastError: token.lastError,
+      lastAttemptAt: Date.now(),
+      incrementRepairCount
+    });
+
+    try {
+      if (this.isExpired(token)) {
+        if (!token.refresh_token) {
+          await this._markTokenInvalid(token, 'Token 已过期且缺少 refresh_token');
+          return { ok: false, status: GEMINICLI_TOKEN_STATUS.INVALID, token };
+        }
+        try {
+          await this.refreshToken(token, true, { skipLifecycleRepair: true });
+        } catch (error) {
+          if (this._isPermanentRefreshFailure(error)) {
+            await this._markTokenInvalid(token, error.message || '刷新 Token 失败');
+            return { ok: false, status: GEMINICLI_TOKEN_STATUS.INVALID, token };
+          }
+          await this._markTokenPending(token, GEMINICLI_PENDING_STAGE.OAUTH_EXCHANGED, error.message || '刷新 Token 失败');
+          return { ok: false, status: GEMINICLI_TOKEN_STATUS.PENDING, token };
+        }
+      }
+
+      if (!token.projectId) {
+        const result = await this.fetchProjectId(token);
+        if (!result?.projectId) {
+          await this._markTokenPending(token, GEMINICLI_PENDING_STAGE.PROJECT_ID, '无法获取 projectId');
+          return { ok: false, status: GEMINICLI_TOKEN_STATUS.PENDING, token };
+        }
+        token.projectId = result.projectId;
+        token.tier = normalizeTier(result.tier, token.tier || 'pro');
+      } else {
+        token.tier = normalizeTier(token.tier, 'pro');
+      }
+
+      const enableResult = await this._enableRequiredApis(token, token.projectId);
+      if (!enableResult.ok) {
+        await this._markTokenPending(token, GEMINICLI_PENDING_STAGE.ENABLE_APIS, enableResult.error || '启用服务失败');
+        return { ok: false, status: GEMINICLI_TOKEN_STATUS.PENDING, token };
+      }
+
+      token.previewCapability = normalizePreviewCapability(
+        token.previewCapability,
+        GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN
+      );
+
+      const probeResult = await this._probePreviewCapability(token);
+      token.previewCapability = normalizePreviewCapability(
+        probeResult.capability,
+        GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN
+      );
+      if (probeResult.error) {
+        token.lastError = probeResult.error;
+      }
+
+      await this._markTokenReady(token, { previewCapability: token.previewCapability });
+      return {
+        ok: true,
+        status: GEMINICLI_TOKEN_STATUS.READY,
+        token,
+        trigger
+      };
+    } catch (error) {
+      await this._markTokenPending(
+        token,
+        token.projectId ? GEMINICLI_PENDING_STAGE.ENABLE_APIS : GEMINICLI_PENDING_STAGE.PROJECT_ID,
+        error.message || '修复失败'
+      );
+      return {
+        ok: false,
+        status: GEMINICLI_TOKEN_STATUS.PENDING,
+        token,
+        error: error.message || '修复失败'
+      };
+    }
+  }
+
+  async _autoRepairPendingTokens(trigger = 'auto') {
+    const candidates = this.tokens.filter((token) => this._shouldAutoRepairToken(token));
+    for (const token of candidates) {
+      try {
+        await this._repairTokenLifecycle(token, {
+          trigger,
+          incrementRepairCount: true
+        });
+      } catch (error) {
+        log.warn(`[GeminiCLI] 自动修复 pending token 失败: ${error.message}`);
+      }
+    }
+  }
+
+  async repairTokenById(tokenId, trigger = 'manual') {
+    const tokenData = await this.findTokenById(tokenId);
+    if (!tokenData) {
+      throw new TokenError('Token不存在', null, 404);
+    }
+
+    const normalized = this._normalizeStoredToken(tokenData);
+    const result = await this._repairTokenLifecycle(normalized, {
+      trigger,
+      incrementRepairCount: true
+    });
+
+    await this.reload();
+    return {
+      status: result.status,
+      pendingStage: normalized.pendingStage || null,
+      projectId: normalized.projectId || null,
+      tier: normalized.tier || 'pro',
+      previewCapability: normalized.previewCapability || GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN,
+      lastError: normalized.lastError || null,
+      lastAttemptAt: normalized.lastAttemptAt || null,
+      repairCount: normalized.repairCount || 0
+    };
+  }
+
   /**
    * 准备单个 token（刷新 + 获取 projectId）
    * @param {Object} token - Token 对象
@@ -637,24 +1114,13 @@ class GeminiCliTokenManager {
    * @private
    */
   async _prepareToken(token) {
+    if (token.status !== GEMINICLI_TOKEN_STATUS.READY) {
+      return 'skip';
+    }
+
     // 刷新过期的 token
     if (this.isExpired(token)) {
       await this.refreshToken(token);
-    }
-
-    // 获取 projectId 和 tier（如果没有）
-    if (!token.projectId) {
-      const result = await this.fetchProjectId(token);
-      if (!result?.projectId) {
-        log.warn(`[GeminiCLI] 无法获取 projectId，禁用账号`);
-        return 'disable';
-      }
-      token.projectId = result.projectId;
-      if (result.tier) token.tier = result.tier;
-      this.saveToFile(token);
-    } else if (!token.tier) {
-      // 已有 projectId 但缺少 tier，默认 pro
-      token.tier = 'pro';
     }
 
     return 'ready';
@@ -725,6 +1191,7 @@ class GeminiCliTokenManager {
 
   _canUseTokenForModel(token, modelId) {
     if (!token || !modelId) return true;
+    if (!this._isReadyToken(token)) return false;
 
     // Tier 过滤：gemini-3.1-pro-preview 仅 pro/ultra 可用
     if (modelId && token.tier === 'free') {
@@ -842,9 +1309,17 @@ class GeminiCliTokenManager {
    */
   async refreshQuotaById(tokenId) {
     await this._ensureInitialized();
-    const token = await this.findTokenById(tokenId);
+    let token = await this.findTokenById(tokenId);
     if (!token) {
       throw new TokenError('Token不存在', null, 404);
+    }
+    const normalized = this._normalizeStoredToken(token);
+    if (normalized.status === GEMINICLI_TOKEN_STATUS.PENDING) {
+      const repairResult = await this.repairTokenById(tokenId, 'refresh_quota');
+      if (repairResult.status !== GEMINICLI_TOKEN_STATUS.READY) {
+        throw new TokenError(repairResult.lastError || 'Token 仍处于待修复状态', null, 400);
+      }
+      token = await this.findTokenById(tokenId);
     }
     if (this.isExpired(token)) {
       await this.refreshToken(token, true);
@@ -947,6 +1422,9 @@ class GeminiCliTokenManager {
         const result = await this._prepareToken(token);
         if (result === 'disable') {
           this.disableToken(token);
+          continue;
+        }
+        if (result !== 'ready') {
           continue;
         }
 
@@ -1097,10 +1575,23 @@ class GeminiCliTokenManager {
     let thresholdFilteredCount = 0;
 
     const startIndex = this.currentQuotaIndex % totalAvailable;
+    const excludeTokenIds = new Set(options.excludeTokenIds || []);
+    const candidateIndices = [];
 
     for (let i = 0; i < totalAvailable; i++) {
       const listIndex = (startIndex + i) % totalAvailable;
       const tokenIndex = this.availableQuotaTokenIndices[listIndex];
+      const token = this.tokens[tokenIndex];
+      if (!token) continue;
+      const tokenId = this.getTokenId(token);
+      if (tokenId && excludeTokenIds.has(tokenId)) continue;
+      candidateIndices.push(tokenIndex);
+    }
+
+    const orderedIndices = this._buildOrderedCandidateIndices(candidateIndices, modelId);
+
+    for (const tokenIndex of orderedIndices) {
+      const listIndex = this.availableQuotaTokenIndices.indexOf(tokenIndex);
       const token = this.tokens[tokenIndex];
       if (!token) continue;
 
@@ -1130,6 +1621,9 @@ class GeminiCliTokenManager {
           if (this.tokens.length === 0 || this.availableQuotaTokenIndices.length === 0) {
             this._throwTokenUnavailable('all_disabled', modelId);
           }
+          continue;
+        }
+        if (result !== 'ready') {
           continue;
         }
 
@@ -1173,6 +1667,7 @@ class GeminiCliTokenManager {
   async _getTokenForDefaultStrategy(modelId = null, options = {}) {
     const totalTokens = this.tokens.length;
     const startIndex = this.currentIndex;
+    const excludeTokenIds = new Set(options.excludeTokenIds || []);
 
     let allTokensExhausted = false;
     if (modelId) {
@@ -1183,9 +1678,20 @@ class GeminiCliTokenManager {
     const fallbackCandidates = [];
     let thresholdCheckedCount = 0;
     let thresholdFilteredCount = 0;
+    const candidateIndices = [];
 
     for (let i = 0; i < totalTokens; i++) {
       const index = (startIndex + i) % totalTokens;
+      const token = this.tokens[index];
+      if (!token) continue;
+      const tokenId = this.getTokenId(token);
+      if (tokenId && excludeTokenIds.has(tokenId)) continue;
+      candidateIndices.push(index);
+    }
+
+    const orderedIndices = this._buildOrderedCandidateIndices(candidateIndices, modelId);
+
+    for (const index of orderedIndices) {
       const token = this.tokens[index];
       if (!token) continue;
 
@@ -1212,6 +1718,9 @@ class GeminiCliTokenManager {
         if (result === 'disable') {
           this.disableToken(token);
           if (this.tokens.length === 0) this._throwTokenUnavailable('all_disabled', modelId);
+          continue;
+        }
+        if (result !== 'ready') {
           continue;
         }
 
@@ -1271,6 +1780,86 @@ class GeminiCliTokenManager {
     log.info('[GeminiCLI] Token已热重载');
   }
 
+  async markPreviewCapability(token, capability) {
+    if (!token?.refresh_token) return;
+    token.previewCapability = normalizePreviewCapability(capability, GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN);
+    await this._persistTokenRecord(token);
+  }
+
+  async markPreviewUnsupported(token, modelId = null) {
+    await this.markPreviewCapability(token, GEMINICLI_PREVIEW_CAPABILITY.UNSUPPORTED);
+    const tokenId = this.getTokenId(token);
+    log.warn(`[GeminiCLI] Token ${tokenId || 'unknown'} 已标记为不支持 preview${modelId ? ` (${modelId})` : ''}`);
+  }
+
+  async _upsertTokenRecord(tokenRecord, { reload = true } = {}) {
+    const allTokens = await this.store.readAll();
+    const existingIndex = allTokens.findIndex((token) => token.refresh_token === tokenRecord.refresh_token);
+    const operation = existingIndex === -1 ? 'added' : 'updated';
+
+    if (existingIndex === -1) {
+      allTokens.push(tokenRecord);
+    } else {
+      allTokens[existingIndex] = { ...allTokens[existingIndex], ...tokenRecord };
+    }
+
+    await this.store.writeAll(allTokens);
+    if (reload) {
+      await this.reload();
+    }
+
+    const salt = await this.store.getSalt();
+    const tokenId = generateTokenId(tokenRecord.refresh_token, salt);
+    return { operation, tokenId };
+  }
+
+  _buildTokenRecord(normalized, existingToken = null) {
+    const base = existingToken ? this._normalizeStoredToken(existingToken) : null;
+    const explicitProjectId = normalized.projectId || base?.projectId || null;
+    const inferredStatus = deriveStoredStatus({
+      ...base,
+      ...normalized,
+      projectId: explicitProjectId
+    });
+
+    return {
+      ...(base || {}),
+      access_token: normalized.access_token ?? base?.access_token ?? '',
+      refresh_token: normalized.refresh_token ?? base?.refresh_token ?? '',
+      expires_in: normalized.expires_in ?? base?.expires_in ?? 3599,
+      timestamp: normalized.timestamp ?? base?.timestamp ?? Date.now(),
+      enable: normalized.enable !== undefined ? normalized.enable : (base?.enable !== false),
+      email: normalized.email ?? base?.email ?? null,
+      projectId: explicitProjectId,
+      hasQuota: normalized.hasQuota !== undefined ? normalized.hasQuota : (base?.hasQuota !== false),
+      useThreshold: normalized.useThreshold !== undefined ? normalized.useThreshold : (base?.useThreshold ?? DEFAULT_TOKEN_THRESHOLD_CONTROL.useThreshold),
+      allowBypassWithSpecialKey: normalized.allowBypassWithSpecialKey !== undefined
+        ? normalized.allowBypassWithSpecialKey
+        : (base?.allowBypassWithSpecialKey ?? DEFAULT_TOKEN_THRESHOLD_CONTROL.allowBypassWithSpecialKey),
+      tier: normalizeTier(normalized.tier, base?.tier || 'pro'),
+      status: normalizeStatus(normalized.status, inferredStatus),
+      pendingStage: normalizePendingStageValue(
+        normalized.pendingStage,
+        inferredStatus === GEMINICLI_TOKEN_STATUS.PENDING
+          ? (explicitProjectId ? GEMINICLI_PENDING_STAGE.ENABLE_APIS : GEMINICLI_PENDING_STAGE.PROJECT_ID)
+          : null
+      ),
+      lastError: normalized.lastError !== undefined
+        ? normalizeTokenErrorMessage(normalized.lastError)
+        : normalizeTokenErrorMessage(base?.lastError),
+      lastAttemptAt: normalized.lastAttemptAt !== undefined
+        ? normalizeLastAttemptAt(normalized.lastAttemptAt)
+        : normalizeLastAttemptAt(base?.lastAttemptAt),
+      repairCount: normalized.repairCount !== undefined
+        ? normalizeRepairCount(normalized.repairCount)
+        : normalizeRepairCount(base?.repairCount),
+      previewCapability: normalizePreviewCapability(
+        normalized.previewCapability ?? normalized.preview,
+        base?.previewCapability || GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN
+      )
+    };
+  }
+
   /**
    * 将 gcli2api 格式的凭证数据转换为 Node.js 项目格式
    * 自动处理字段名映射和过期时间格式差异
@@ -1280,20 +1869,58 @@ class GeminiCliTokenManager {
   static normalizeCredentialFormat(data) {
     const result = { ...data };
 
+    if (result.token && !result.access_token) {
+      result.access_token = result.token;
+    }
+    delete result.token;
+
+    if (result.accessToken && !result.access_token) {
+      result.access_token = result.accessToken;
+    }
+    delete result.accessToken;
+
+    if (result.refreshToken && !result.refresh_token) {
+      result.refresh_token = result.refreshToken;
+    }
+    delete result.refreshToken;
+
     // 1. project_id → projectId（gcli2api 用下划线格式）
     if (result.project_id && !result.projectId) {
       result.projectId = result.project_id;
     }
+    if (result.project && !result.projectId) {
+      result.projectId = result.project;
+    }
     delete result.project_id;
+    delete result.project;
 
-    // 2. expires_at (ISO datetime) → expires_in + timestamp
-    if (result.expires_at && !result.timestamp) {
-      const expiresAtMs = new Date(result.expires_at).getTime();
+    if (result.user_email && !result.email) {
+      result.email = result.user_email;
+    }
+    delete result.user_email;
+
+    if (result.enabled !== undefined && result.enable === undefined) {
+      result.enable = normalizeBooleanLike(result.enabled);
+    }
+    if (result.disabled !== undefined && result.enable === undefined) {
+      const disabledValue = normalizeBooleanLike(result.disabled);
+      if (disabledValue !== undefined) {
+        result.enable = !disabledValue;
+      }
+    }
+    delete result.enabled;
+    delete result.disabled;
+
+    // 2. expiry / expires_at (ISO datetime) → expires_in + timestamp
+    const expiryValue = result.expiry || result.expires_at;
+    if (expiryValue && (result.expires_in === undefined || result.expires_in === null || result.expires_in === "")) {
+      const expiresAtMs = new Date(expiryValue).getTime();
       if (!isNaN(expiresAtMs)) {
-        result.timestamp = Date.now();
+        result.timestamp = result.timestamp || Date.now();
         result.expires_in = Math.max(0, Math.floor((expiresAtMs - result.timestamp) / 1000));
       }
     }
+    delete result.expiry;
     delete result.expires_at;
 
     // 3. 清理 gcli2api 特有的字段（Node.js 使用全局 GEMINICLI_OAUTH_CONFIG）
@@ -1308,46 +1935,69 @@ class GeminiCliTokenManager {
       result.tier = result.tier.toLowerCase();
     }
 
+    if (result.preview !== undefined && result.previewCapability === undefined) {
+      result.previewCapability = normalizePreviewCapability(result.preview);
+    }
+    delete result.preview;
+
     return result;
   }
 
-  async addToken(tokenData) {
+  async addToken(tokenData, options = {}) {
     try {
-      // 自动转换 gcli2api 格式的凭证（兼容 project_id、expires_at 等字段）
+      const { reload = true, attemptRepair = true, source = 'manual' } = options;
       const normalized = GeminiCliTokenManager.normalizeCredentialFormat(tokenData);
+      if ((source === 'oauth' || source === 'geminicli') && normalized.enable === undefined) {
+        normalized.enable = true;
+      }
+      if (!normalized.refresh_token) {
+        return { success: false, message: 'refresh_token必填' };
+      }
+      if (!normalized.access_token) {
+        return { success: false, message: 'access_token/token必填' };
+      }
+
       const allTokens = await this.store.readAll();
+      const existingToken = allTokens.find((token) => token.refresh_token === normalized.refresh_token) || null;
+      const tokenRecord = this._buildTokenRecord(normalized, existingToken);
 
-      const newToken = {
-        access_token: normalized.access_token,
-        refresh_token: normalized.refresh_token,
-        expires_in: normalized.expires_in || 3599,
-        timestamp: normalized.timestamp || Date.now(),
-        enable: normalized.enable !== undefined ? normalized.enable : true,
-        useThreshold: normalized.useThreshold !== undefined
-          ? normalized.useThreshold
-          : DEFAULT_TOKEN_THRESHOLD_CONTROL.useThreshold,
-        allowBypassWithSpecialKey: normalized.allowBypassWithSpecialKey !== undefined
-          ? normalized.allowBypassWithSpecialKey
-          : DEFAULT_TOKEN_THRESHOLD_CONTROL.allowBypassWithSpecialKey
+      if (source === 'oauth' && !tokenRecord.projectId) {
+        this._applyLifecycleState(tokenRecord, {
+          status: GEMINICLI_TOKEN_STATUS.PENDING,
+          pendingStage: GEMINICLI_PENDING_STAGE.OAUTH_EXCHANGED,
+          lastError: null
+        });
+      }
+
+      if (attemptRepair && tokenRecord.enable !== false && tokenRecord.status !== GEMINICLI_TOKEN_STATUS.INVALID) {
+        await this._repairTokenLifecycle(tokenRecord, {
+          trigger: source,
+          incrementRepairCount: true
+        });
+      }
+
+      const { operation, tokenId } = await this._upsertTokenRecord(tokenRecord, { reload });
+
+      const isReady = tokenRecord.status === GEMINICLI_TOKEN_STATUS.READY;
+      const actionMessage = operation === 'added' ? 'Token添加成功' : 'Token更新成功';
+      const finalMessage = isReady ? actionMessage : `${actionMessage}（当前处于待修复状态）`;
+
+      return {
+        success: true,
+        message: finalMessage,
+        data: {
+          id: tokenId,
+          operation,
+          status: tokenRecord.status,
+          pendingStage: tokenRecord.pendingStage || null,
+          projectId: tokenRecord.projectId || null,
+          tier: tokenRecord.tier || 'pro',
+          previewCapability: tokenRecord.previewCapability || GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN,
+          lastError: tokenRecord.lastError || null,
+          lastAttemptAt: tokenRecord.lastAttemptAt || null,
+          repairCount: tokenRecord.repairCount || 0
+        }
       };
-
-      if (normalized.email) {
-        newToken.email = normalized.email;
-      }
-
-      if (normalized.projectId) {
-        newToken.projectId = normalized.projectId;
-      }
-
-      if (normalized.tier) {
-        newToken.tier = normalized.tier;
-      }
-
-      allTokens.push(newToken);
-      await this.store.writeAll(allTokens);
-
-      await this.reload();
-      return { success: true, message: 'Token添加成功' };
     } catch (error) {
       log.error('[GeminiCLI] 添加Token失败:', error.message);
       return { success: false, message: error.message };
@@ -1399,7 +2049,8 @@ class GeminiCliTokenManager {
       const salt = await this.store.getSalt();
 
       return allTokens.map(token => {
-        const tokenId = generateTokenId(token.refresh_token, salt);
+        const normalizedToken = this._normalizeStoredToken(token);
+        const tokenId = generateTokenId(normalizedToken.refresh_token, salt);
         const quotaData = quotaManager.getQuotaAnyAge(tokenId);
 
         // 构造额度摘要：按模型组聚合
@@ -1427,14 +2078,20 @@ class GeminiCliTokenManager {
         }
 
         return {
-          ...normalizeTokenThresholdControl(token),
+          ...normalizeTokenThresholdControl(normalizedToken),
           id: tokenId,
-          expires_in: token.expires_in,
-          timestamp: token.timestamp,
-          enable: token.enable !== false,
-          email: token.email || null,
-          projectId: token.projectId || null,
-          tier: token.tier || 'pro',
+          expires_in: normalizedToken.expires_in,
+          timestamp: normalizedToken.timestamp,
+          enable: normalizedToken.enable !== false,
+          email: normalizedToken.email || null,
+          projectId: normalizedToken.projectId || null,
+          tier: normalizedToken.tier || 'pro',
+          status: normalizedToken.status || GEMINICLI_TOKEN_STATUS.PENDING,
+          pendingStage: normalizedToken.pendingStage || null,
+          lastError: normalizedToken.lastError || null,
+          lastAttemptAt: normalizedToken.lastAttemptAt || null,
+          repairCount: normalizedToken.repairCount || 0,
+          previewCapability: normalizedToken.previewCapability || GEMINICLI_PREVIEW_CAPABILITY.UNKNOWN,
           quota: quotaSummary,
           cooldowns: tokenCooldownManager.getAllCooldowns()[tokenId] || null
         };
@@ -1451,47 +2108,7 @@ class GeminiCliTokenManager {
    * @returns {Promise<Object>} 包含 projectId 的结果
    */
   async fetchProjectIdForToken(tokenId) {
-    const tokenData = await this.findTokenById(tokenId);
-    if (!tokenData) {
-      throw new TokenError('Token不存在', null, 404);
-    }
-
-    // 确保 token 未过期
-    if (this.isExpired(tokenData)) {
-      await this.refreshToken(tokenData);
-    }
-
-    const result = await this.fetchProjectId(tokenData);
-    const projectId = result?.projectId;
-    const tier = result?.tier;
-    if (!projectId) {
-      throw new TokenError('无法获取 projectId，该账号可能无资格', null, 400);
-    }
-
-    // 更新并保存
-    tokenData.projectId = projectId;
-    if (tier) tokenData.tier = tier;
-    
-    // 更新文件
-    const allTokens = await this.store.readAll();
-    const salt = await this.store.getSalt();
-    const index = allTokens.findIndex(t =>
-      generateTokenId(t.refresh_token, salt) === tokenId
-    );
-    if (index !== -1) {
-      allTokens[index].projectId = projectId;
-      if (tier) allTokens[index].tier = tier;
-      await this.store.writeAll(allTokens);
-    }
-
-    // 更新内存中的 token
-    const memoryToken = this.tokens.find(t => t.refresh_token === tokenData.refresh_token);
-    if (memoryToken) {
-      memoryToken.projectId = projectId;
-      if (tier) memoryToken.tier = tier;
-    }
-
-    return { projectId, tier };
+    return this.repairTokenById(tokenId, 'manual_project_id');
   }
 
   /**
@@ -1585,7 +2202,8 @@ class GeminiCliTokenManager {
     const refreshedToken = await this.refreshToken(tokenData);
     return {
       expires_in: refreshedToken.expires_in,
-      timestamp: refreshedToken.timestamp
+      timestamp: refreshedToken.timestamp,
+      status: refreshedToken.status || GEMINICLI_TOKEN_STATUS.PENDING
     };
   }
 

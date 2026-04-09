@@ -69,20 +69,30 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
 
     const { geminiRequest, model: actualModel, features, sourceFormat } = convertToGeminiCli(cleanedBody);
     const bypassThreshold = req.apiAuthContext?.isBypassThreshold === true;
-    const token = await getToken(actualModel, { bypassThreshold });
-    const tokenId = geminicliTokenManager.getTokenId(token);
+    let token = await getToken(actualModel, { bypassThreshold });
+    const getCurrentTokenId = () => geminicliTokenManager.getTokenId(token);
     const refreshQuota = async () => {
-      if (!tokenId) return;
+      const currentTokenId = getCurrentTokenId();
+      if (!currentTokenId) return;
       await geminicliTokenManager.refreshQuota(token);
+    };
+    const acquireRetryToken = async () => {
+      const currentTokenId = getCurrentTokenId();
+      token = await getToken(actualModel, {
+        bypassThreshold,
+        excludeTokenIds: currentTokenId ? [currentTokenId] : []
+      });
+      return token;
     };
     const createRetryOptions = (prefix) => ({
       loggerPrefix: prefix,
       onAttempt: () => recordRequest(token, actualModel),
-      tokenId,
+      tokenId: getCurrentTokenId(),
       modelId: actualModel,
       refreshQuota,
       tokenManager: geminicliTokenManager,
-      token
+      token,
+      acquireRetryToken
     });
 
 

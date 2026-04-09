@@ -81,14 +81,31 @@ function buildRequestBody(requestBody, model, projectId) {
   };
 }
 
+function isPreviewModel(model) {
+  return typeof model === 'string' && model.toLowerCase().includes('preview');
+}
+
+function createPreviewCapabilityRetryError(message) {
+  const error = new Error(message);
+  error.name = 'GeminiCliPreviewCapabilityError';
+  error.statusCode = 404;
+  error.isRetryableWithNextToken = true;
+  return error;
+}
+
 /**
  * 统一错误处理
  * @param {Error} error - 错误对象
  * @param {Object} token - Token 对象
  */
-async function handleApiError(error, token) {
+async function handleApiError(error, token, model = '') {
   const status = getUpstreamStatus(error);
   const errorBody = await readUpstreamErrorBody(error);
+
+  if (status === 404 && isPreviewModel(model)) {
+    await geminicliTokenManager.markPreviewUnsupported(token, model);
+    throw createPreviewCapabilityRetryError('当前凭证不支持 preview 模型，已切换下一凭证');
+  }
   
   if (status === 403) {
     if (isCallerDoesNotHavePermission(errorBody)) {
@@ -150,6 +167,10 @@ export async function generateStreamResponse(requestBody, token, model, callback
       body: fullRequestBody,
       processor
     });
+
+    if (isPreviewModel(model)) {
+      await geminicliTokenManager.markPreviewCapability(token, 'supported');
+    }
     
     // 流式响应结束后写入日志
     if (dumpId) {
@@ -157,7 +178,7 @@ export async function generateStreamResponse(requestBody, token, model, callback
     }
   } catch (error) {
     try { processor.close(); } catch { }
-    await handleApiError(error, token);
+    await handleApiError(error, token, model);
   }
 }
 
@@ -193,7 +214,7 @@ export async function generateNoStreamResponse(requestBody, token, model) {
       dumpFinalRawResponse
     });
   } catch (error) {
-    await handleApiError(error, token);
+    await handleApiError(error, token, model);
   }
   
   // 处理 GeminiCLI 的 response 包装格式
@@ -215,6 +236,9 @@ export async function generateNoStreamResponse(requestBody, token, model) {
   const usageData = toOpenAIUsage(data.usageMetadata);
 
   if (parsed.imageUrls.length > 0) {
+    if (isPreviewModel(model)) {
+      await geminicliTokenManager.markPreviewCapability(token, 'supported');
+    }
     let markdown = parsed.content ? parsed.content + '\n\n' : '';
     markdown += parsed.imageUrls.map(url => `![image](${url})`).join('\n\n');
     return {
@@ -224,6 +248,10 @@ export async function generateNoStreamResponse(requestBody, token, model) {
       toolCalls: parsed.toolCalls,
       usage: usageData
     };
+  }
+
+  if (isPreviewModel(model)) {
+    await geminicliTokenManager.markPreviewCapability(token, 'supported');
   }
 
   return {

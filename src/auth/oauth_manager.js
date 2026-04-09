@@ -3,6 +3,7 @@ import log from '../utils/logger.js';
 import tokenManager from './token_manager.js';
 import requesterManager from '../utils/requesterManager.js';
 import {
+  AUTH_MODES,
   GEMINICLI_OAUTH_CONFIG,
   GEMINICLI_OAUTH_SCOPES,
   OAUTH_CONFIG,
@@ -14,15 +15,23 @@ class OAuthManager {
     this.state = crypto.randomUUID();
   }
 
+  normalizeMode(mode) {
+    const normalized = typeof mode === 'string' ? mode.trim().toLowerCase() : '';
+    return normalized === AUTH_MODES.GEMINICLI
+      ? AUTH_MODES.GEMINICLI
+      : AUTH_MODES.ANTIGRAVITY;
+  }
+
   /**
    * 生成授权URL
    * @param {number} port - 回调端口
    * @param {string} mode - 模式：'antigravity' 或 'geminicli'
    */
-  generateAuthUrl(port, mode = 'antigravity') {
+  generateAuthUrl(port, mode = AUTH_MODES.ANTIGRAVITY, stateOverride = null) {
+    const normalizedMode = this.normalizeMode(mode);
     const oauthConfig =
-      mode === 'geminicli' ? GEMINICLI_OAUTH_CONFIG : OAUTH_CONFIG;
-    const scopes = mode === 'geminicli' ? GEMINICLI_OAUTH_SCOPES : OAUTH_SCOPES;
+      normalizedMode === AUTH_MODES.GEMINICLI ? GEMINICLI_OAUTH_CONFIG : OAUTH_CONFIG;
+    const scopes = normalizedMode === AUTH_MODES.GEMINICLI ? GEMINICLI_OAUTH_SCOPES : OAUTH_SCOPES;
 
     const params = new URLSearchParams({
       access_type: 'offline',
@@ -31,7 +40,7 @@ class OAuthManager {
       redirect_uri: `http://localhost:${port}/oauth-callback`,
       response_type: 'code',
       scope: scopes.join(' '),
-      state: `${this.state}_${mode}`,
+      state: stateOverride || `${this.state}_${normalizedMode}`,
     });
     return `${oauthConfig.AUTH_URL}?${params.toString()}`;
   }
@@ -42,9 +51,10 @@ class OAuthManager {
    * @param {number} port - 回调端口
    * @param {string} mode - 模式：'antigravity' 或 'geminicli'
    */
-  async exchangeCodeForToken(code, port, mode = 'antigravity') {
+  async exchangeCodeForToken(code, port, mode = AUTH_MODES.ANTIGRAVITY) {
+    const normalizedMode = this.normalizeMode(mode);
     const oauthConfig =
-      mode === 'geminicli' ? GEMINICLI_OAUTH_CONFIG : OAUTH_CONFIG;
+      normalizedMode === AUTH_MODES.GEMINICLI ? GEMINICLI_OAUTH_CONFIG : OAUTH_CONFIG;
 
     const postData = new URLSearchParams({
       code,
@@ -128,8 +138,9 @@ class OAuthManager {
    * @param {number} port - 回调端口
    * @param {string} mode - 模式：'antigravity' 或 'geminicli'
    */
-  async authenticate(code, port, mode = 'antigravity') {
-    const tokenData = await this.exchangeCodeForToken(code, port, mode);
+  async authenticate(code, port, mode = AUTH_MODES.ANTIGRAVITY) {
+    const normalizedMode = this.normalizeMode(mode);
+    const tokenData = await this.exchangeCodeForToken(code, port, normalizedMode);
 
     if (!tokenData.access_token) {
       throw new Error('Token交换失败：未获取到access_token');
@@ -145,10 +156,10 @@ class OAuthManager {
     const email = await this.fetchUserEmail(account.access_token);
     if (email) {
       account.email = email;
-      log.info(`[${mode}] 获取到用户邮箱: ${email}`);
+      log.info(`[${normalizedMode}] 获取到用户邮箱: ${email}`);
     }
 
-    if (mode === 'antigravity') {
+    if (normalizedMode === AUTH_MODES.ANTIGRAVITY) {
       const { projectId, hasQuota, sub } = await this.validateAndGetProjectId(
         account.access_token,
       );
@@ -167,7 +178,7 @@ class OAuthManager {
    * @param {number} port - 回调端口
    */
   async authenticateGeminiCli(code, port) {
-    return this.authenticate(code, port, 'GeminiCLI');
+    return this.authenticate(code, port, AUTH_MODES.GEMINICLI);
   }
 }
 
