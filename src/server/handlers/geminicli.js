@@ -80,7 +80,9 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
       onAttempt: () => recordRequest(token, actualModel),
       tokenId,
       modelId: actualModel,
-      refreshQuota
+      refreshQuota,
+      tokenManager: geminicliTokenManager,
+      token
     });
 
 

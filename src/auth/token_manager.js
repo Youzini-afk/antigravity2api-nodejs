@@ -1193,6 +1193,11 @@ class TokenManager {
     return this._getTokenForDefaultStrategy(modelId, options);
   }
 
+  // 兼容上游新增的调用方式
+  async getNextToken(modelId = null, options = {}) {
+    return this.getToken(modelId, options);
+  }
+
   /**
    * 额度耗尽策略的 token 获取
    * @param {string} [modelId] - 请求的模型 ID

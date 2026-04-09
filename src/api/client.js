@@ -316,6 +316,7 @@ export async function generateAssistantResponse(requestBody, token, callback) {
   const messageId = randomUUID();
   const modelName = requestBody.model;
   const headers = buildHeaders(token, modelName);
+  headers['Transfer-Encoding'] = 'chunked';
   const dumpId = isDebugDumpEnabled() ? createDumpId('stream') : null;
   const streamCollector = dumpId ? createStreamCollector() : null;
   headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody)));
@@ -472,6 +473,7 @@ export async function generateAssistantResponseNoStream(requestBody, token) {
   const messageId = randomUUID();
   const modelName = requestBody.model;
   const headers = buildHeaders(token, modelName);
+  headers['Transfer-Encoding'] = 'chunked';
   const dumpId = isDebugDumpEnabled() ? createDumpId('no_stream') : null;
   let num = Math.floor(Math.random() * QA_PAIRS.length);
   headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody)));
@@ -555,6 +557,7 @@ export async function generateImageForSD(requestBody, token) {
   const messageId = randomUUID();
   const modelName = requestBody.model;
   const headers = buildHeaders(token, modelName);
+  headers['Transfer-Encoding'] = 'chunked';
   headers["Content-Length"] = String(Buffer.byteLength(JSON.stringify(requestBody),'utf-8'));
   let num = Math.floor(Math.random() * QA_PAIRS.length);
 

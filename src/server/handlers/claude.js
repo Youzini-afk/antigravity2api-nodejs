@@ -87,7 +87,9 @@ export const handleClaudeRequest = async (req, res, isStream) => {
       onAttempt: () => tokenManager.recordRequest(token, actualModel),
       tokenId,
       modelId: actualModel,
-      refreshQuota
+      refreshQuota,
+      tokenManager,
+      token
     });
 
     // 使用统一参数规范化模块处理 Claude 格式参数

@@ -458,13 +458,13 @@ router.post("/tokens", cookieAuthMiddleware, async (req, res) => {
   try {
     const result = await tokenManager.addToken(tokenData);
     logger.info(`添加新Token: ${access_token.substring(0, 8)}...`);
-    res.json(result);
+    // 返回符合前端预期的格式
+    res.json({ success: true, message: 'Token添加成功', data: result });
   } catch (error) {
     logger.error("添加Token失败:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
-
 // 使用 tokenId 替代 refreshToken
 router.put("/tokens/:tokenId", cookieAuthMiddleware, async (req, res) => {
   const { tokenId } = req.params;
