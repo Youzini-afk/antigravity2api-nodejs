@@ -194,8 +194,6 @@ class TokenManager {
         if (allExhausted) {
           log.warn(`所有token对模型 ${modelId} 都不可用，重置额度状态`);
           this.pool.resetAllQuotas();
-          quotaManager.resetAllQuotas();
-          tokenCooldownManager.resetAll();
 
           // 重新获取可用 tokens
           availableTokens = this.pool.getEnabledIds().map(tokenId => ({
@@ -276,8 +274,6 @@ class TokenManager {
         if (allExhausted) {
           log.warn(`所有token对模型 ${modelId} 都不可用，重置额度状态`);
           this.pool.resetAllQuotas();
-          quotaManager.resetAllQuotas();
-          tokenCooldownManager.resetAll();
 
           // 重新获取可用 tokens
           availableTokens = this.pool.getEnabledIds().map(tokenId => ({
