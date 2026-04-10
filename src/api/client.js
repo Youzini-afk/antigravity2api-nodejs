@@ -166,7 +166,7 @@ async function handleApiError(error, token, dumpId = null) {
     if (isCallerDoesNotHavePermission(errorBody)) {
       throw createApiError(`超出模型最大上下文。错误详情: ${errorBody}`, status, errorBody);
     }
-    tokenManager.disableCurrentToken(token);
+    tokenManager.disableToken(token);
     throw createApiError(`该账号没有使用权限，已自动禁用。错误详情: ${errorBody}`, status, errorBody);
   }
 
