@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import log from '../utils/logger.js';
-import tokenManager from './token_manager.js';
 import requesterManager from '../utils/requesterManager.js';
+import ProjectIdFetcher from './project_id_fetcher.js';
 import {
   AUTH_MODES,
   GEMINICLI_OAUTH_CONFIG,
@@ -110,26 +110,11 @@ class OAuthManager {
   }
 
   /**
-   * 资格校验：尝试获取projectId
+   * 使用 ProjectIdFetcher 的完整验证流程获取账号信息
    */
-  async validateAndGetProjectId(accessToken) {
-    try {
-      log.info('正在验证账号资格...');
-      const { projectId, sub } =
-        (await tokenManager.fetchProjectId({ access_token: accessToken })) || {};
-
-      if (projectId === undefined || projectId === null) {
-        log.warn('该账号无法获取 projectId，可能无资格或需要稍后重试');
-        return { projectId: null, hasQuota: false, sub };
-      }
-
-      log.info(`账号验证通过，projectId: ${projectId}`);
-      return { projectId, hasQuota: true, sub };
-    } catch (err) {
-      log.error(`验证账号资格失败: ${err.message}`);
-      const sub = 'free-tier';
-      return { projectId: null, hasQuota: false, sub };
-    }
+  async validateAccount(accessToken) {
+    const fetcher = new ProjectIdFetcher();
+    return fetcher.validateAccount({ access_token: accessToken });
   }
 
   /**
@@ -160,12 +145,22 @@ class OAuthManager {
     }
 
     if (normalizedMode === AUTH_MODES.ANTIGRAVITY) {
-      const { projectId, hasQuota, sub } = await this.validateAndGetProjectId(
-        account.access_token,
-      );
-      account.projectId = projectId;
-      account.hasQuota = hasQuota;
-      account.sub = sub;
+      const validation = await this.validateAccount(account.access_token);
+      account.projectId = validation.projectId;
+      account.hasQuota = validation.hasQuota;
+      account.sub = validation.sub;
+      account.isActivated = validation.isActivated;
+
+      if (validation.credits !== null && validation.credits !== undefined) {
+        account.credits = validation.credits;
+        log.info(
+          `[${normalizedMode}] 账号验证完成: sub=${validation.sub}, source=${validation.source}, credits=${validation.credits}`,
+        );
+      } else {
+        log.info(
+          `[${normalizedMode}] 账号验证完成: sub=${validation.sub}, source=${validation.source}`,
+        );
+      }
     }
 
     account.enable = true;

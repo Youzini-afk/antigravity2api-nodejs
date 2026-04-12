@@ -152,14 +152,14 @@ export function getEnvPath() {
 
 /**
  * 获取配置文件路径集合
- * @returns {{envPath: string, configJsonPath: string, configJsonExamplePath: string, examplePath: string}} 配置文件路径
+ * @returns {{envPath: string, configJsonPath: string, configJsonExamplePath: string, examplePath: string, upstreamJsonPath: string}} 配置文件路径
  */
 export function getConfigPaths() {
   if (isPkg) {
     // pkg 环境：优先使用可执行文件旁边的配置文件
     const exeDir = path.dirname(process.execPath);
     const cwdDir = process.cwd();
-    
+
     // 查找 .env 文件
     let envPath = path.join(exeDir, '.env');
     if (!fs.existsSync(envPath)) {
@@ -168,7 +168,7 @@ export function getConfigPaths() {
         envPath = cwdEnvPath;
       }
     }
-    
+
     // 查找 config.json 文件
     let configJsonPath = path.join(exeDir, 'config.json');
     if (!fs.existsSync(configJsonPath)) {
@@ -177,7 +177,7 @@ export function getConfigPaths() {
         configJsonPath = cwdConfigPath;
       }
     }
-    
+
     // 查找 config.json.example 文件
     let configJsonExamplePath = path.join(exeDir, 'config.json.example');
     if (!fs.existsSync(configJsonExamplePath)) {
@@ -186,7 +186,7 @@ export function getConfigPaths() {
         configJsonExamplePath = cwdExamplePath;
       }
     }
-    
+
     // 查找 .env.example 文件
     let examplePath = path.join(exeDir, '.env.example');
     if (!fs.existsSync(examplePath)) {
@@ -195,16 +195,33 @@ export function getConfigPaths() {
         examplePath = cwdExamplePath;
       }
     }
-    
-    return { envPath, configJsonPath, configJsonExamplePath, examplePath };
+
+    // 查找 upstream.json 文件（上游协议配置，git 跟踪）
+    // pkg 环境：优先可执行文件旁 src/config/upstream.json，其次 cwd，最后 snapshot 内
+    let upstreamJsonPath = path.join(exeDir, 'src', 'config', 'upstream.json');
+    if (!fs.existsSync(upstreamJsonPath)) {
+      const cwdUpstreamPath = path.join(cwdDir, 'src', 'config', 'upstream.json');
+      if (fs.existsSync(cwdUpstreamPath)) {
+        upstreamJsonPath = cwdUpstreamPath;
+      } else {
+        // fallback 到 snapshot 内路径（esbuild 打包后 __dirname 指向打包内目录）
+        const snapshotUpstreamPath = path.join(__dirname, '../config/upstream.json');
+        if (fs.existsSync(snapshotUpstreamPath)) {
+          upstreamJsonPath = snapshotUpstreamPath;
+        }
+      }
+    }
+
+    return { envPath, configJsonPath, configJsonExamplePath, examplePath, upstreamJsonPath };
   }
-  
+
   // 开发环境
   return {
     envPath: path.join(__dirname, '../../.env'),
     configJsonPath: path.join(__dirname, '../../config.json'),
     configJsonExamplePath: path.join(__dirname, '../../config.json.example'),
-    examplePath: path.join(__dirname, '../../.env.example')
+    examplePath: path.join(__dirname, '../../.env.example'),
+    upstreamJsonPath: path.join(__dirname, '../config/upstream.json')
   };
 }
 

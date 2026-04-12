@@ -12,6 +12,7 @@ import TokenStore from './token_store.js';
 import { TokenError } from '../utils/errors.js';
 import quotaManager from './quota_manager.js';
 import tokenCooldownManager from './token_cooldown_manager.js';
+import ProjectIdFetcher from './project_id_fetcher.js';
 import { randomUUID } from 'crypto';
 
 // 轮询策略枚举
@@ -105,8 +106,8 @@ class TokenManager {
 
     /** @type {Promise<void>|null} */
     this._initPromise = null;
+    this.projectIdFetcher = new ProjectIdFetcher();
   }
-
   async _initialize() {
     try {
       log.info('正在初始化token管理器...');
@@ -144,6 +145,7 @@ class TokenManager {
 
         // 并发刷新所有过期的 token
         await this._refreshExpiredTokensConcurrently();
+        await this._syncMissingCreditsForEnabledTokens();
       }
     } catch (error) {
       log.error('初始化token失败:', error.message);
@@ -204,6 +206,43 @@ class TokenManager {
       log.warn(`刷新完成: 成功 ${successCount}, 失败 ${failCount} (${failedTokenIds.join(', ')}), 耗时 ${elapsed}ms`);
     } else {
       log.info(`刷新完成: 成功 ${successCount}, 耗时 ${elapsed}ms`);
+    }
+  }
+
+  /**
+   * 为已启用但缺少积分信息的 token 自动补拉积分
+   * @private
+   */
+  async _syncMissingCreditsForEnabledTokens() {
+    const candidates = this.tokens.filter(
+      (token) => token.enable !== false && (token.credits === null || token.credits === undefined),
+    );
+
+    if (candidates.length === 0) {
+      return;
+    }
+
+    log.info(`检测到 ${candidates.length} 个启用Token缺少积分信息，开始自动同步`);
+
+    const results = await Promise.allSettled(candidates.map(async (token) => {
+      const subscriptionInfo = await this.projectIdFetcher.fetchSubscriptionAndCredits(token);
+      if (subscriptionInfo.fetched === false) {
+        return false;
+      }
+
+      token.sub = subscriptionInfo.sub || token.sub || 'free-tier';
+      token.credits = subscriptionInfo.credits ?? null;
+      await this._persistToken(token);
+      return true;
+    }));
+
+    const successCount = results.filter(result => result.status === 'fulfilled' && result.value === true).length;
+    const failCount = candidates.length - successCount;
+
+    if (successCount > 0) {
+      log.info(`积分自动同步完成: 成功 ${successCount} 个${failCount > 0 ? `, 失败 ${failCount} 个` : ''}`);
+    } else if (failCount > 0) {
+      log.warn(`积分自动同步失败: 共 ${failCount} 个`);
     }
   }
 
@@ -274,6 +313,26 @@ class TokenManager {
     } catch (error) {
       log.warn('加载轮询配置失败，使用默认值:', error.message);
     }
+  }
+
+  /**
+   * 持久化单个 token
+   * @param {Object} token - Token 对象
+   * @private
+   */
+  async _persistToken(token) {
+    if (!token?.refresh_token) return;
+
+    const allTokens = await this.store.readAll();
+    const index = allTokens.findIndex((item) => item.refresh_token === token.refresh_token);
+    if (index === -1) return;
+
+    allTokens[index] = {
+      ...allTokens[index],
+      ...token,
+      ...normalizeTokenThresholdControl(token),
+    };
+    await this.store.writeAll(allTokens);
   }
 
   // 更新轮询策略（热更新）
@@ -1418,6 +1477,30 @@ class TokenManager {
   async addToken(tokenData) {
     try {
       const allTokens = await this.store.readAll();
+      let resolvedProjectId = tokenData.projectId;
+      let resolvedSub = tokenData.sub;
+      let resolvedCredits = tokenData.credits;
+      let resolvedHasQuota = tokenData.hasQuota;
+
+      if (tokenData.access_token && (!resolvedProjectId || !resolvedSub || resolvedCredits === undefined)) {
+        try {
+          const fetchResult = await this.projectIdFetcher.fetchProjectId(tokenData);
+          if (!resolvedProjectId && fetchResult?.projectId) {
+            resolvedProjectId = fetchResult.projectId;
+          }
+          if (!resolvedSub && fetchResult?.sub) {
+            resolvedSub = fetchResult.sub;
+          }
+          if (resolvedCredits === undefined && fetchResult?.credits !== undefined) {
+            resolvedCredits = fetchResult.credits;
+          }
+          if (resolvedHasQuota === undefined && fetchResult?.projectId) {
+            resolvedHasQuota = true;
+          }
+        } catch (error) {
+          log.warn(`添加Token时补齐 projectId/订阅信息失败: ${error.message}`);
+        }
+      }
 
       const newToken = {
         access_token: tokenData.access_token,
@@ -1433,17 +1516,20 @@ class TokenManager {
           : DEFAULT_TOKEN_THRESHOLD_CONTROL.allowBypassWithSpecialKey
       };
 
-      if (tokenData.projectId) {
-        newToken.projectId = tokenData.projectId;
+      if (resolvedProjectId) {
+        newToken.projectId = resolvedProjectId;
       }
       if (tokenData.email) {
         newToken.email = tokenData.email;
       }
-      if (tokenData.hasQuota !== undefined) {
-        newToken.hasQuota = tokenData.hasQuota;
+      if (resolvedHasQuota !== undefined) {
+        newToken.hasQuota = resolvedHasQuota;
       }
-      if (tokenData.sub) {
-        newToken.sub = tokenData.sub;
+      if (resolvedSub) {
+        newToken.sub = resolvedSub;
+      }
+      if (resolvedCredits !== undefined) {
+        newToken.credits = resolvedCredits ?? null;
       }
 
       allTokens.push(newToken);
@@ -1510,7 +1596,9 @@ class TokenManager {
         enable: token.enable !== false,
         projectId: token.projectId || null,
         email: token.email || null,
-        hasQuota: token.hasQuota !== false
+        hasQuota: token.hasQuota !== false,
+        sub: token.sub || null,
+        credits: token.credits !== null && token.credits !== undefined ? token.credits : null,
       }));
     } catch (error) {
       log.error('获取Token列表失败:', error.message);
@@ -1556,10 +1644,28 @@ class TokenManager {
         return { success: false, message: 'Token不存在' };
       }
 
+      const wasEnabled = allTokens[index].enable !== false;
       allTokens[index] = { ...allTokens[index], ...updates };
       await this.store.writeAll(allTokens);
 
       await this.reload();
+      const isEnabling = updates.enable === true && !wasEnabled;
+      if (isEnabling) {
+        let syncedCredits = false;
+
+        try {
+          const subscriptionInfo = await this.refreshSubscriptionAndCreditsById(tokenId);
+          syncedCredits = subscriptionInfo.fetched !== false;
+        } catch (error) {
+          log.warn(`启用Token后自动同步积分失败 (${tokenId}): ${error.message}`);
+        }
+
+        return {
+          success: true,
+          message: syncedCredits ? 'Token启用成功，积分已自动同步' : 'Token启用成功，但积分同步失败',
+          syncedCredits
+        };
+      }
       return { success: true, message: 'Token更新成功' };
     } catch (error) {
       log.error('更新Token失败:', error.message);
@@ -1610,6 +1716,45 @@ class TokenManager {
     return {
       expires_in: refreshedToken.expires_in,
       timestamp: refreshedToken.timestamp
+    };
+  }
+
+  /**
+   * 根据 tokenId 刷新订阅和积分信息
+   * @param {string} tokenId - Token ID
+   * @returns {Promise<{sub: string, credits: number|null, isActivated: boolean, fetched: boolean}>}
+   */
+  async refreshSubscriptionAndCreditsById(tokenId) {
+    await this._ensureInitialized();
+
+    const token = await this.findTokenById(tokenId);
+    if (!token) {
+      throw new TokenError('Token不存在', null, 404);
+    }
+
+    if (this.isExpired(token)) {
+      await this.refreshToken(token);
+    }
+
+    const subscriptionInfo = await this.projectIdFetcher.fetchSubscriptionAndCredits(token);
+    if (!subscriptionInfo.fetched) {
+      return {
+        sub: token.sub || 'free-tier',
+        credits: token.credits ?? null,
+        isActivated: false,
+        fetched: false,
+      };
+    }
+
+    token.sub = subscriptionInfo.sub || token.sub || 'free-tier';
+    token.credits = subscriptionInfo.credits ?? null;
+    await this._persistToken(token);
+
+    return {
+      ...subscriptionInfo,
+      sub: token.sub,
+      credits: token.credits,
+      fetched: true,
     };
   }
 

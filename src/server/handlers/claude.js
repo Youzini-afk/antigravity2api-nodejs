@@ -81,17 +81,6 @@ export const handleClaudeRequest = async (req, res, isStream) => {
       quotaManager.updateQuota(tokenId, quotas);
     };
 
-    // 创建 with429Retry 选项
-    const createRetryOptions = (prefix) => ({
-      loggerPrefix: prefix,
-      onAttempt: () => tokenManager.recordRequest(token, actualModel),
-      tokenId,
-      modelId: actualModel,
-      refreshQuota,
-      tokenManager,
-      token
-    });
-
     // 使用统一参数规范化模块处理 Claude 格式参数
     const parameters = normalizeClaudeParameters(rawParams);
 
@@ -101,6 +90,17 @@ export const handleClaudeRequest = async (req, res, isStream) => {
     if (isImageModel) {
       prepareImageRequest(requestBody);
     }
+
+    // 创建 with429Retry 选项
+    const createRetryOptions = (prefix) => ({
+      loggerPrefix: prefix,
+      onAttempt: () => tokenManager.recordRequest(token, actualModel),
+      tokenId,
+      modelId: actualModel,
+      refreshQuota,
+      tokenManager,
+      token,
+    });
 
     const msgId = `msg_${Date.now()}`;
     const safeRetries = getSafeRetries(config.retryTimes);
@@ -134,7 +134,12 @@ export const handleClaudeRequest = async (req, res, isStream) => {
         if (isImageModel) {
           // 生图模型：使用非流式获取结果后以流式格式返回
           const { content, usage } = await with429Retry(
-            () => generateAssistantResponseNoStream(requestBody, token),
+            (attempt, shouldUseCredits) => {
+              const actualRequestBody = shouldUseCredits
+                ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                : requestBody;
+              return generateAssistantResponseNoStream(actualRequestBody, token);
+            },
             safeRetries,
             createRetryOptions('claude.stream.image ')
           );
@@ -170,7 +175,6 @@ export const handleClaudeRequest = async (req, res, isStream) => {
           return;
         }
 
-        // 提取流式回调（抗截断和正常模式共用）
         const onStreamEvent = (data) => {
           if (data.type === 'usage') {
             usageData = data.usage;
@@ -272,17 +276,28 @@ export const handleClaudeRequest = async (req, res, isStream) => {
 
         if (useAntiTruncation) {
           const processor = new AntiTruncationStreamProcessor(
-            (payload, cb) => with429Retry(
-              () => generateAssistantResponse(payload, token, cb),
-              safeRetries,
-              createRetryOptions('claude.stream.anti_trunc ')
-            ),
+            (payload, cb) =>
+              with429Retry(
+                (attempt, shouldUseCredits) => {
+                  const actualRequestBody = shouldUseCredits
+                    ? { ...payload, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                    : payload;
+                  return generateAssistantResponse(actualRequestBody, token, cb);
+                },
+                safeRetries,
+                createRetryOptions('claude.stream.anti_trunc ')
+              ),
             requestBody
           );
           await processor.run(onStreamEvent);
         } else {
           await with429Retry(
-            () => generateAssistantResponse(requestBody, token, onStreamEvent),
+            (attempt, shouldUseCredits) => {
+              const actualRequestBody = shouldUseCredits
+                ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                : requestBody;
+              return generateAssistantResponse(actualRequestBody, token, onStreamEvent);
+            },
             safeRetries,
             createRetryOptions('claude.stream ')
           );
@@ -334,20 +349,25 @@ export const handleClaudeRequest = async (req, res, isStream) => {
 
       try {
         await with429Retry(
-          () => generateAssistantResponse(requestBody, token, (data) => {
-            if (data.type === 'usage') {
-              usageData = data.usage;
-            } else if (data.type === 'reasoning') {
-              reasoningContent += data.reasoning_content || '';
-              if (data.thoughtSignature) {
-                reasoningSignature = data.thoughtSignature;
+          (attempt, shouldUseCredits) => {
+            const actualRequestBody = shouldUseCredits
+              ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+              : requestBody;
+            return generateAssistantResponse(actualRequestBody, token, (data) => {
+              if (data.type === 'usage') {
+                usageData = data.usage;
+              } else if (data.type === 'reasoning') {
+                reasoningContent += data.reasoning_content || '';
+                if (data.thoughtSignature) {
+                  reasoningSignature = data.thoughtSignature;
+                }
+              } else if (data.type === 'tool_calls') {
+                toolCalls.push(...data.tool_calls);
+              } else if (data.type === 'text') {
+                content += data.content || '';
               }
-            } else if (data.type === 'tool_calls') {
-              toolCalls.push(...data.tool_calls);
-            } else if (data.type === 'text') {
-              content += data.content || '';
-            }
-          }),
+            });
+          },
           safeRetries,
           createRetryOptions('claude.fake_no_stream ')
         );
@@ -378,7 +398,12 @@ export const handleClaudeRequest = async (req, res, isStream) => {
       res.setTimeout(0);
 
       const { content, reasoningContent, reasoningSignature, toolCalls, usage } = await with429Retry(
-        () => generateAssistantResponseNoStream(requestBody, token),
+        (attempt, shouldUseCredits) => {
+          const actualRequestBody = shouldUseCredits
+            ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+            : requestBody;
+          return generateAssistantResponseNoStream(actualRequestBody, token);
+        },
         safeRetries,
         createRetryOptions('claude.no_stream ')
       );

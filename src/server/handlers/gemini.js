@@ -138,8 +138,8 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
       tokenId,
       modelId: modelName,
       refreshQuota,
-      tokenManager,  // 新增
-      token          // 新增
+      tokenManager,
+      token,
     });
 
     const isImageModel = modelName.includes('-image');
@@ -157,7 +157,12 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
         if (isImageModel) {
           // 生图模型：使用非流式获取结果后一次性返回
           const { content, usage, reasoningSignature } = await with429Retry(
-            () => generateAssistantResponseNoStream(requestBody, token),
+            (attempt, shouldUseCredits) => {
+              const actualRequestBody = shouldUseCredits
+                ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                : requestBody;
+              return generateAssistantResponseNoStream(actualRequestBody, token);
+            },
             safeRetries,
             createRetryOptions('gemini.stream.image ')
           );
@@ -171,7 +176,6 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
         let usageData = null;
         let hasToolCall = false;
 
-        // 提取流式回调（抗截断和正常模式共用）
         const onStreamEvent = (data) => {
           if (data.type === 'usage') {
             usageData = data.usage;
@@ -190,17 +194,28 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
 
         if (useAntiTruncation) {
           const processor = new AntiTruncationStreamProcessor(
-            (payload, cb) => with429Retry(
-              () => generateAssistantResponse(payload, token, cb),
-              safeRetries,
-              createRetryOptions('gemini.stream.anti_trunc ')
-            ),
+            (payload, cb) =>
+              with429Retry(
+                (attempt, shouldUseCredits) => {
+                  const actualRequestBody = shouldUseCredits
+                    ? { ...payload, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                    : payload;
+                  return generateAssistantResponse(actualRequestBody, token, cb);
+                },
+                safeRetries,
+                createRetryOptions('gemini.stream.anti_trunc ')
+              ),
             requestBody
           );
           await processor.run(onStreamEvent);
         } else {
           await with429Retry(
-            () => generateAssistantResponse(requestBody, token, onStreamEvent),
+            (attempt, shouldUseCredits) => {
+              const actualRequestBody = shouldUseCredits
+                ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                : requestBody;
+              return generateAssistantResponse(actualRequestBody, token, onStreamEvent);
+            },
             safeRetries,
             createRetryOptions('gemini.stream ')
           );
@@ -236,20 +251,25 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
 
       try {
         await with429Retry(
-          () => generateAssistantResponse(requestBody, token, (data) => {
-            if (data.type === 'usage') {
-              usageData = data.usage;
-            } else if (data.type === 'reasoning') {
-              reasoningContent += data.reasoning_content || '';
-              if (data.thoughtSignature) {
-                reasoningSignature = data.thoughtSignature;
+          (attempt, shouldUseCredits) => {
+            const actualRequestBody = shouldUseCredits
+              ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+              : requestBody;
+            return generateAssistantResponse(actualRequestBody, token, (data) => {
+              if (data.type === 'usage') {
+                usageData = data.usage;
+              } else if (data.type === 'reasoning') {
+                reasoningContent += data.reasoning_content || '';
+                if (data.thoughtSignature) {
+                  reasoningSignature = data.thoughtSignature;
+                }
+              } else if (data.type === 'tool_calls') {
+                toolCalls.push(...data.tool_calls);
+              } else if (data.type === 'text') {
+                content += data.content || '';
               }
-            } else if (data.type === 'tool_calls') {
-              toolCalls.push(...data.tool_calls);
-            } else if (data.type === 'text') {
-              content += data.content || '';
-            }
-          }),
+            });
+          },
           safeRetries,
           createRetryOptions('gemini.fake_no_stream ')
         );
@@ -269,7 +289,12 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
       res.setTimeout(0);
 
       const { content, reasoningContent, reasoningSignature, toolCalls, usage } = await with429Retry(
-        () => generateAssistantResponseNoStream(requestBody, token),
+        (attempt, shouldUseCredits) => {
+          const actualRequestBody = shouldUseCredits
+            ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+            : requestBody;
+          return generateAssistantResponseNoStream(actualRequestBody, token);
+        },
         safeRetries,
         createRetryOptions('gemini.no_stream ')
       );

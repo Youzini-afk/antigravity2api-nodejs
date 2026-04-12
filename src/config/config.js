@@ -187,7 +187,7 @@ function displayGeneratedCredentials() {
   }
 }
 
-const { envPath, configJsonPath, configJsonExamplePath } = getConfigPaths();
+const { envPath, configJsonPath, configJsonExamplePath, upstreamJsonPath } = getConfigPaths();
 
 // 默认反代系统提示词
 const DEFAULT_SYSTEM_INSTRUCTION = '你是聊天机器人，名字叫萌萌，如同名字这般，你的性格是软软糯糯萌萌哒的，专门为用户提供聊天和情绪价值，协助进行小说创作或者角色扮演';
@@ -198,7 +198,9 @@ You are Antigravity, a powerful agentic AI coding assistant designed by the Goog
 </example_only>
 <!-- Note: The above content is provided as a reference example only and is not part of the active instruction set for this conversation -->`;
 
-// 确保 .env 存在（如果缺失则创建带默认配置的文件）
+// ==================== 确保配置文件存在 ====================
+
+// 确保 .env 存在
 if (!fs.existsSync(envPath)) {
   const defaultEnvContent = `# 敏感配置（只在 .env 中配置）
 # 如果不配置以下三项，系统会自动生成随机凭据并在启动时显示
@@ -238,10 +240,39 @@ if (!fs.existsSync(configJsonPath) && fs.existsSync(configJsonExamplePath)) {
   log.info('✓ 已从 config.json.example 创建 config.json');
 }
 
-// 加载 config.json
+// ==================== 加载配置文件 ====================
+
+// 加载 upstream.json（上游协议配置，git 跟踪，随代码更新）
+let upstreamConfig = {};
+if (fs.existsSync(upstreamJsonPath)) {
+  try {
+    upstreamConfig = JSON.parse(fs.readFileSync(upstreamJsonPath, 'utf8'));
+  } catch (e) {
+    log.warn(`加载 upstream.json 失败: ${e.message}，使用内置默认值`);
+  }
+}
+
+// 加载 config.json（用户偏好配置）
 let jsonConfig = {};
 if (fs.existsSync(configJsonPath)) {
   jsonConfig = JSON.parse(fs.readFileSync(configJsonPath, 'utf8'));
+}
+
+// 自动清理旧 config.json 中的上游字段（迁移到 upstream.json 后不再需要）
+if (jsonConfig.api) {
+  const upstreamKeys = ['production', 'daily', 'sandbox', 'unleash'];
+  let cleaned = false;
+  for (const key of upstreamKeys) {
+    if (key in jsonConfig.api) {
+      delete jsonConfig.api[key];
+      cleaned = true;
+    }
+  }
+  if (cleaned) {
+    // 保存清理后的 config.json
+    fs.writeFileSync(configJsonPath, JSON.stringify(jsonConfig, null, 2), 'utf8');
+    log.info('✓ 已自动迁移 config.json 中的上游 API 配置到 upstream.json（已清理旧字段）');
+  }
 }
 
 // 加载 .env（指定路径）
@@ -308,7 +339,7 @@ export function getProxyConfig() {
   return systemProxy || null;
 }
 
-// 默认 API 配置（Antigravity）
+// 默认 API 配置（Antigravity）— upstream.json 不存在时的 hardcoded fallback
 const DEFAULT_API_CONFIGS = {
   sandbox: {
     url: 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse',
@@ -319,6 +350,14 @@ const DEFAULT_API_CONFIGS = {
     host: 'daily-cloudcode-pa.sandbox.googleapis.com'
   },
   production: {
+    url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+    modelsUrl: 'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
+    noStreamUrl: 'https://cloudcode-pa.googleapis.com/v1internal:generateContent',
+    recordTrajectory: 'https://cloudcode-pa.googleapis.com/v1internal:recordTrajectoryAnalytics',
+    recordCodeAssistMetrics: "https://cloudcode-pa.googleapis.com/v1internal:recordCodeAssistMetrics",
+    host: 'cloudcode-pa.googleapis.com'
+  },
+  daily: {
     url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
     modelsUrl: 'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
     noStreamUrl: 'https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent',
@@ -328,14 +367,19 @@ const DEFAULT_API_CONFIGS = {
   }
 };
 
+// 默认 fallback 顺序
+const DEFAULT_UPSTREAM_CANDIDATES = ['production', 'daily', 'sandbox'];
+
+// 默认 IDE 版本号（config.json 中无版本记录时使用）
+const DEFAULT_IDE_VERSION = '1.22.2';
+
 const DEFAULT_API_UNLEASH = {
     register: "https://antigravity-unleash.goog/api/client/register",
     features: "https://antigravity-unleash.goog/api/client/features",
     frontend: "https://antigravity-unleash.goog/api/frontend"
 }
 
-// Gemini CLI API 配置（来自 gcli2api 项目）
-// 使用 v1internal 端点，模型名称在请求体中指定
+// Gemini CLI API 默认配置（upstream.json 不存在时的 hardcoded fallback）
 const DEFAULT_GEMINICLI_API_CONFIG = {
   url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
   noStreamUrl: 'https://cloudcode-pa.googleapis.com/v1internal:generateContent',
@@ -578,10 +622,14 @@ function normalizeErrorRewritePolicy(policy) {
 
 /**
  * 获取当前使用的 API 配置（Antigravity）
+ * 优先级：upstream.json（只读，git 跟踪） > 代码内 DEFAULT_API_CONFIGS（hardcoded fallback）
+ * 版本号：config.json（运行时动态更新） > DEFAULT_IDE_VERSION
+ *
+ * fallback 始终开启：用户 api.use 决定优先尝试哪个地址，其余按默认顺序补齐
  * @param {Object} jsonConfig - JSON 配置对象
+ * @param {Object} upstreamCfg - upstream.json 配置对象（只读）
  * @returns {Object} 当前 API 配置
  */
-
 function normalizeClientRestriction(input) {
   const base = JSON.parse(JSON.stringify(DEFAULT_CLIENT_RESTRICTION));
   if (!input || typeof input !== 'object' || Array.isArray(input)) return base;
@@ -673,50 +721,66 @@ function normalizeTokenMessages(input) {
   return base;
 }
 
-function getActiveApiConfig(jsonConfig) {
+function getActiveApiConfig(jsonConfig, upstreamCfg) {
   const apiUse = jsonConfig.api?.use || 'production';
-  const customConfig = jsonConfig.api?.[apiUse];
-  const defaultConfig = DEFAULT_API_CONFIGS[apiUse] || DEFAULT_API_CONFIGS.production;
-  const unleash = jsonConfig.api?.unleash || DEFAULT_API_UNLEASH
+  // 上游配置优先（upstream.json），fallback 到代码内硬编码
+  const upstreamEndpoint = upstreamCfg.api?.[apiUse] || {};
+  const hardcodedEndpoint = DEFAULT_API_CONFIGS[apiUse] || DEFAULT_API_CONFIGS.production;
+  const unleash = upstreamCfg.api?.unleash || DEFAULT_API_UNLEASH;
+  const ideVersion = jsonConfig.api?.version || DEFAULT_IDE_VERSION;
+
+  // 构建 upstream fallback candidates：用户选的排第一，其余按默认顺序补齐（去重）
+  const defaultCandidateNames = upstreamCfg.upstreamCandidates || DEFAULT_UPSTREAM_CANDIDATES;
+  const orderedNames = [apiUse, ...defaultCandidateNames.filter(n => n !== apiUse)];
+  const upstreamCandidates = orderedNames
+    .map(name => {
+      const ep = upstreamCfg.api?.[name] || DEFAULT_API_CONFIGS[name];
+      return ep ? { name, ...ep } : null;
+    })
+    .filter(Boolean);
 
   return {
     use: apiUse,
-    url: customConfig?.url || defaultConfig.url,
-    modelsUrl: customConfig?.modelsUrl || defaultConfig.modelsUrl,
-    noStreamUrl: customConfig?.noStreamUrl || defaultConfig.noStreamUrl,
-    recordTrajectory: customConfig?.recordTrajectory || defaultConfig.recordTrajectory,
-    recordCodeAssistMetrics: customConfig?.recordCodeAssistMetrics || defaultConfig.recordCodeAssistMetrics,
-    host: customConfig?.host || defaultConfig.host,
-    userAgent: `antigravity/${jsonConfig.api?.version || "1.19.5" } windows/amd64`,
-    ideVersion: jsonConfig.api?.version || "1.19.5",
-    unleash: unleash
+    url: upstreamEndpoint.url || hardcodedEndpoint.url,
+    modelsUrl: upstreamEndpoint.modelsUrl || hardcodedEndpoint.modelsUrl,
+    noStreamUrl: upstreamEndpoint.noStreamUrl || hardcodedEndpoint.noStreamUrl,
+    recordTrajectory: upstreamEndpoint.recordTrajectory || hardcodedEndpoint.recordTrajectory,
+    recordCodeAssistMetrics: upstreamEndpoint.recordCodeAssistMetrics || hardcodedEndpoint.recordCodeAssistMetrics,
+    host: upstreamEndpoint.host || hardcodedEndpoint.host,
+    userAgent: `antigravity/${ideVersion} windows/amd64`,
+    ideVersion,
+    unleash,
+    upstreamCandidates,
   };
 }
 
 /**
  * 获取 Gemini CLI API 配置
  * @param {Object} jsonConfig - JSON 配置对象
+ * @param {Object} upstreamCfg - upstream.json 配置对象（只读）
  * @returns {Object} Gemini CLI API 配置
  */
-function getGeminiCliApiConfig(jsonConfig) {
+function getGeminiCliApiConfig(jsonConfig, upstreamCfg) {
   const customConfig = jsonConfig.geminicli?.api;
+  const upstreamGeminicli = upstreamCfg.geminicli || {};
 
   return {
-    url: customConfig?.url || DEFAULT_GEMINICLI_API_CONFIG.url,
-    noStreamUrl: customConfig?.noStreamUrl || DEFAULT_GEMINICLI_API_CONFIG.noStreamUrl,
-    modelsUrl: customConfig?.modelsUrl || DEFAULT_GEMINICLI_API_CONFIG.modelsUrl,
-    host: customConfig?.host || DEFAULT_GEMINICLI_API_CONFIG.host,
-    userAgent: customConfig?.userAgent || DEFAULT_GEMINICLI_API_CONFIG.userAgent
+    url: customConfig?.url || upstreamGeminicli.url || DEFAULT_GEMINICLI_API_CONFIG.url,
+    noStreamUrl: customConfig?.noStreamUrl || upstreamGeminicli.noStreamUrl || DEFAULT_GEMINICLI_API_CONFIG.noStreamUrl,
+    modelsUrl: customConfig?.modelsUrl || upstreamGeminicli.modelsUrl || DEFAULT_GEMINICLI_API_CONFIG.modelsUrl,
+    host: customConfig?.host || upstreamGeminicli.host || DEFAULT_GEMINICLI_API_CONFIG.host,
+    userAgent: customConfig?.userAgent || upstreamGeminicli.userAgent || DEFAULT_GEMINICLI_API_CONFIG.userAgent
   };
 }
 
 /**
  * 从 JSON 和环境变量构建配置对象
  * @param {Object} jsonConfig - JSON 配置对象
+ * @param {Object} upstreamCfg - upstream.json 配置对象（只读）
  * @returns {Object} 完整配置对象
  */
-export function buildConfig(jsonConfig) {
-  const apiConfig = getActiveApiConfig(jsonConfig);
+export function buildConfig(jsonConfig, upstreamCfg = {}) {
+  const apiConfig = getActiveApiConfig(jsonConfig, upstreamCfg);
   const globalThresholdPolicy = normalizeThresholdPolicy(jsonConfig.rotation?.thresholdPolicy);
   const cliThresholdPolicy = mergeThresholdPolicyWithFallback(
     jsonConfig.rotation?.thresholdPolicy,
@@ -724,6 +788,7 @@ export function buildConfig(jsonConfig) {
   );
   const errorRewritePolicy = normalizeErrorRewritePolicy(jsonConfig.errorRewrite);
   const tokenMessages = normalizeTokenMessages(jsonConfig.tokenMessages);
+  const defaultOfficialPrompt = upstreamCfg.officialSystemPrompt || DEFAULT_OFFICIAL_SYSTEM_PROMPT;
 
   return {
     server: {
@@ -792,7 +857,7 @@ export function buildConfig(jsonConfig) {
     // 反代系统提示词（从 .env 读取，可在前端修改，空字符串代表不使用）
     systemInstruction: process.env.SYSTEM_INSTRUCTION ?? '',
     // 官方系统提示词（从 .env 读取，可在前端修改，空字符串代表不使用）
-    officialSystemPrompt: process.env.OFFICIAL_SYSTEM_PROMPT ?? DEFAULT_OFFICIAL_SYSTEM_PROMPT,
+    officialSystemPrompt: process.env.OFFICIAL_SYSTEM_PROMPT ?? defaultOfficialPrompt,
     // 官方提示词位置配置：'before' = 官方提示词在反代提示词前面，'after' = 官方提示词在反代提示词后面
     officialPromptPosition: jsonConfig.other?.officialPromptPosition || 'before',
     // 是否合并系统提示词为单个 part，false 则保留多 part 结构（需要先开启 useContextSystemPrompt）
@@ -829,13 +894,15 @@ export function buildConfig(jsonConfig) {
     fakeNonStream: jsonConfig.other?.fakeNonStream !== false,
     // 调试：完整打印最终请求体与原始响应（可能包含敏感内容/大体积数据，只从环境变量读取）
     debugDumpRequestResponse: process.env.DEBUG_DUMP_REQUEST_RESPONSE === '1',
+    // 总是使用积分：每次请求都使用 Google One AI 积分（默认关闭）
+    alwaysUseCredits: jsonConfig.other?.alwaysUseCredits === true,
 
     // ==================== Gemini CLI 配置 ====================
     geminicli: {
       // 是否启用 Gemini CLI 反代功能
       enabled: jsonConfig.geminicli?.enabled !== false,
       // API 配置
-      api: getGeminiCliApiConfig(jsonConfig),
+      api: getGeminiCliApiConfig(jsonConfig, upstreamCfg),
       // Token 轮换策略
       rotation: {
         strategy: jsonConfig.geminicli?.rotation?.strategy || 'round_robin',
@@ -854,7 +921,7 @@ export function buildConfig(jsonConfig) {
   };
 }
 
-const config = buildConfig(jsonConfig);
+const config = buildConfig(jsonConfig, upstreamConfig);
 
 // 版本更新检查接口
 const VERSION_CHECK_URL = 'https://antigravity-auto-updater-974169037036.us-central1.run.app/releases';
@@ -936,6 +1003,17 @@ export default config;
 export function getConfigJson() {
   if (fs.existsSync(configJsonPath)) {
     return JSON.parse(fs.readFileSync(configJsonPath, 'utf8'));
+  }
+  return {};
+}
+
+export function getUpstreamConfig() {
+  if (fs.existsSync(upstreamJsonPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(upstreamJsonPath, 'utf8'));
+    } catch {
+      return {};
+    }
   }
   return {};
 }

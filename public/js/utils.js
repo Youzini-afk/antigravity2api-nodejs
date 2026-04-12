@@ -20,6 +20,30 @@ function escapeJs(str) {
         .replace(/\r/g, '\\r');
 }
 
+// 格式化订阅类型显示名称（把 API 原始 tier id 转成简短标签）
+function formatSubTier(sub) {
+    if (!sub) return '';
+    const lower = sub.toLowerCase();
+    if (lower === 'free-tier') return 'FREE';
+    // g1-pro-tier / g1-pro → PRO
+    if (lower.includes('pro')) return 'PRO';
+    // g1-enterprise-tier → ENT
+    if (lower.includes('enterprise')) return 'ENT';
+    // 其他未知 tier，取中间段大写（去掉 g1- 前缀和 -tier 后缀）
+    let display = sub.replace(/^g1-/i, '').replace(/-tier$/i, '');
+    return display.toUpperCase();
+}
+
+// 格式化积分数值显示
+function formatCredits(credits) {
+    if (credits === null || credits === undefined) return '-';
+    const num = Number(credits);
+    if (!Number.isFinite(num)) return '-';
+    // 整数不带小数，小数保留两位
+    if (Number.isInteger(num)) return String(num);
+    return num.toFixed(2);
+}
+
 // 字体大小设置
 function initFontSize() {
     const savedSize = localStorage.getItem('fontSize') || '18';

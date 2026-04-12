@@ -1,9 +1,8 @@
-import axios from 'axios';
 import { log } from '../utils/logger.js';
 import { OAUTH_CONFIG } from '../constants/oauth.js';
 import { TOKEN_REFRESH_BUFFER } from '../constants/index.js';
-import { buildAxiosRequestConfig } from '../utils/httpClient.js';
 import { TokenError } from '../utils/errors.js';
+import requesterManager from '../utils/requesterManager.js';
 
 /**
  * Token 生命周期管理类
@@ -46,17 +45,17 @@ class TokenLifecycleManager {
     });
 
     try {
-      const response = await axios(buildAxiosRequestConfig({
+      const response = await requesterManager.fetch(OAUTH_CONFIG.TOKEN_URL, {
         method: 'POST',
-        url: OAUTH_CONFIG.TOKEN_URL,
         headers: {
           'Host': 'oauth2.googleapis.com',
           'User-Agent': 'Go-http-client/1.1',
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept-Encoding': 'gzip'
         },
-        data: body.toString()
-      }));
+        body: body.toString(),
+        okStatus: [200]
+      });
 
       token.access_token = response.data.access_token;
       token.expires_in = response.data.expires_in;
@@ -64,12 +63,12 @@ class TokenLifecycleManager {
 
       return token;
     } catch (error) {
-      const statusCode = error.response?.status;
-      const rawBody = error.response?.data;
+      const statusCode = error.status || 500;
+      const rawBody = error.message;
       const message = typeof rawBody === 'string'
         ? rawBody
-        : (rawBody?.error?.message || error.message || '刷新 token 失败');
-      throw new TokenError(message, tokenId, statusCode || 500);
+        : (rawBody?.error?.message || '刷新 token 失败');
+      throw new TokenError(message, tokenId, statusCode);
     }
   }
 

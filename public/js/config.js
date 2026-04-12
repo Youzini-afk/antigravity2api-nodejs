@@ -592,6 +592,7 @@ async function loadConfig() {
                 if (form.elements['CACHE_IMAGE_SIGNATURES']) form.elements['CACHE_IMAGE_SIGNATURES'].checked = json.other.cacheImageSignatures !== false;
                 if (form.elements['CACHE_THINKING']) form.elements['CACHE_THINKING'].checked = json.other.cacheThinking !== false;
                 if (form.elements['FAKE_NON_STREAM']) form.elements['FAKE_NON_STREAM'].checked = json.other.fakeNonStream !== false;
+                if (form.elements['ALWAYS_USE_CREDITS']) form.elements['ALWAYS_USE_CREDITS'].checked = json.other.alwaysUseCredits || false;
             }
 
             const errorRewrite = json.errorRewrite || {};
@@ -913,6 +914,7 @@ async function saveConfig(e) {
         },
         allBelowThresholdAction: form.elements['ROTATION_THRESHOLD_ALL_BELOW_ACTION']?.value || 'strict'
     };
+    jsonConfig.other.alwaysUseCredits = form.elements['ALWAYS_USE_CREDITS']?.checked || false;
 
     Object.entries(allConfig).forEach(([key, value]) => {
         if (sensitiveKeys.includes(key)) {
@@ -936,7 +938,7 @@ async function saveConfig(e) {
                 const num = parseInt(value);
                 jsonConfig.other.retryTimes = Number.isNaN(num) ? undefined : num;
             }
-            else if (key === 'SKIP_PROJECT_ID_FETCH' || key === 'USE_NATIVE_AXIOS' || key === 'USE_CONTEXT_SYSTEM_PROMPT' || key === 'MERGE_SYSTEM_PROMPT' || key === 'OFFICIAL_PROMPT_POSITION' || key === 'PASS_SIGNATURE_TO_CLIENT' || key === 'USE_FALLBACK_SIGNATURE' || key === 'CACHE_ALL_SIGNATURES' || key === 'CACHE_TOOL_SIGNATURES' || key === 'CACHE_IMAGE_SIGNATURES' || key === 'CACHE_THINKING' || key === 'FAKE_NON_STREAM') {
+            else if (key === 'SKIP_PROJECT_ID_FETCH' || key === 'USE_NATIVE_AXIOS' || key === 'USE_CONTEXT_SYSTEM_PROMPT' || key === 'MERGE_SYSTEM_PROMPT' || key === 'OFFICIAL_PROMPT_POSITION' || key === 'PASS_SIGNATURE_TO_CLIENT' || key === 'USE_FALLBACK_SIGNATURE' || key === 'CACHE_ALL_SIGNATURES' || key === 'CACHE_TOOL_SIGNATURES' || key === 'CACHE_IMAGE_SIGNATURES' || key === 'CACHE_THINKING' || key === 'FAKE_NON_STREAM' || key === 'ALWAYS_USE_CREDITS') {
                 // 跳过，已在上面处理
             }
             else if (key === 'ERROR_REWRITE_ENABLED') {

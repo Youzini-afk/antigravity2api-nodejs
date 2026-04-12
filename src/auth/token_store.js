@@ -145,6 +145,23 @@ class TokenStore {
   }
 
   /**
+   * 过滤无效 token 条目
+   * @param {Array} tokens - 原始 token 数组
+   * @returns {Array} 过滤后的有效 token 数组
+   * @private
+   */
+  _filterValidTokens(tokens) {
+    return tokens.filter(t => {
+      if (!t || typeof t !== 'object') return false;
+      if (!t.refresh_token && !t.access_token) {
+        log.warn('跳过无效 token 条目（缺少 refresh_token 和 access_token）');
+        return false;
+      }
+      return true;
+    });
+  }
+
+  /**
    * 读取全部 token（包含禁用的），带简单内存缓存
    * @returns {Promise<Array<object>>}
    */
@@ -160,10 +177,10 @@ class TokenStore {
       
       // 兼容旧格式：如果是数组，直接使用
       if (Array.isArray(parsed)) {
-        this._cache = parsed;
+        this._cache = this._filterValidTokens(parsed);
         this._lastReadOk = true;
       } else if (parsed.tokens && Array.isArray(parsed.tokens)) {
-        this._cache = parsed.tokens;
+        this._cache = this._filterValidTokens(parsed.tokens);
         this._lastReadOk = true;
       } else {
         log.warn('账号配置文件格式异常，保留缓存并跳过本次读取');

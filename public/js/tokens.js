@@ -433,34 +433,78 @@ function findFieldByKeyword(obj, keyword) {
     return undefined;
 }
 
+function normalizeImportedTextValue(value) {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed || undefined;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+    }
+    return undefined;
+}
+
+function normalizeImportedProjectId(value) {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value === 'object') {
+        return normalizeImportedProjectId(value.id ?? value.projectId ?? value.name);
+    }
+    return normalizeImportedTextValue(value);
+}
+
+function parseImportedEnable(rawToken) {
+    let enable = findFieldByKeyword(rawToken, 'enable');
+    if (enable === undefined) enable = findFieldByKeyword(rawToken, 'enabled');
+
+    let disabled = findFieldByKeyword(rawToken, 'disable');
+    if (disabled === undefined) disabled = findFieldByKeyword(rawToken, 'disabled');
+
+    if (enable === undefined && disabled !== undefined) {
+        return !normalizeTruthyBoolean(disabled);
+    }
+
+    if (enable === undefined) return true;
+    return normalizeTruthyBoolean(enable);
+}
+
 // 智能解析单个 Token 对象
 function smartParseToken(rawToken) {
     if (!rawToken || typeof rawToken !== 'object') return null;
 
-    // 必需字段：包含 refresh 的认为是 refresh_token，包含 project 的认为是 projectId
-    const refresh_token = findFieldByKeyword(rawToken, 'refresh');
-    const projectId = findFieldByKeyword(rawToken, 'project');
+    const refresh_token = normalizeImportedTextValue(findFieldByKeyword(rawToken, 'refresh'));
 
-    // 必须同时包含这两个字段
-    if (!refresh_token || !projectId) return null;
+    if (!refresh_token) return null;
 
-    // 构建标准化的 token 对象
-    const token = { refresh_token, projectId };
+    const token = { refresh_token };
 
-    // 可选字段自动获取
-    const access_token = findFieldByKeyword(rawToken, 'access');
-    const email = findFieldByKeyword(rawToken, 'email') || findFieldByKeyword(rawToken, 'mail');
-    const expires_in = findFieldByKeyword(rawToken, 'expire');
-    const enable = findFieldByKeyword(rawToken, 'enable');
-    const timestamp = findFieldByKeyword(rawToken, 'time') || findFieldByKeyword(rawToken, 'stamp');
+    const projectId = normalizeImportedProjectId(findFieldByKeyword(rawToken, 'project'));
+    const access_token = normalizeImportedTextValue(findFieldByKeyword(rawToken, 'access') || rawToken.token);
+    const email = normalizeImportedTextValue(findFieldByKeyword(rawToken, 'email') || findFieldByKeyword(rawToken, 'mail'));
+    const expires_in = findFieldByKeyword(rawToken, 'expires') || findFieldByKeyword(rawToken, 'expire');
+    const timestamp = findFieldByKeyword(rawToken, 'time') || findFieldByKeyword(rawToken, 'stamp') || findFieldByKeyword(rawToken, 'created');
+    const expiry = findFieldByKeyword(rawToken, 'expiry') || findFieldByKeyword(rawToken, 'expiresat');
     const hasQuota = findFieldByKeyword(rawToken, 'quota');
+    const sub = normalizeImportedTextValue(findFieldByKeyword(rawToken, 'subscription') || findFieldByKeyword(rawToken, 'tier') || rawToken.sub);
+    const credits = findFieldByKeyword(rawToken, 'credit');
 
+    if (projectId) token.projectId = projectId;
     if (access_token) token.access_token = access_token;
     if (email) token.email = email;
-    if (expires_in !== undefined) token.expires_in = parseInt(expires_in) || 3599;
-    if (enable !== undefined) token.enable = enable === true || enable === 'true' || enable === 1;
-    if (timestamp) token.timestamp = typeof timestamp === 'number' ? timestamp : new Date(timestamp).getTime();
-    if (hasQuota !== undefined) token.hasQuota = hasQuota === true || hasQuota === 'true' || hasQuota === 1;
+
+    const derived = deriveExpiresInAndTimestamp({ expires_in, expiry, timestamp });
+    token.expires_in = derived.expires_in;
+    token.timestamp = derived.timestamp;
+    token.enable = parseImportedEnable(rawToken);
+
+    if (hasQuota !== undefined) token.hasQuota = normalizeTruthyBoolean(hasQuota);
+    if (sub) token.sub = sub;
+    if (credits !== undefined && credits !== null && String(credits).trim() !== '') {
+        const parsedCredits = Number(credits);
+        if (Number.isFinite(parsedCredits)) {
+            token.credits = parsedCredits;
+        }
+    }
 
     return token;
 }
@@ -507,7 +551,7 @@ function smartParseImportData(jsonText) {
     }
 
     if (tokensArray.length === 0) {
-        return { success: false, message: '未找到有效数据，请确保包含 refresh_token 和 projectId' };
+        return { success: false, message: '未找到有效数据，请确保至少包含 refresh_token' };
     }
 
     // 解析每个 token
@@ -523,7 +567,7 @@ function smartParseImportData(jsonText) {
     }
 
     if (validTokens.length === 0) {
-        return { success: false, message: `所有 ${tokensArray.length} 条数据都缺少必需字段 (refresh_token 和 projectId)` };
+        return { success: false, message: `所有 ${tokensArray.length} 条数据都缺少必需字段 (refresh_token)` };
     }
 
     const message = invalidCount > 0
@@ -970,6 +1014,8 @@ function renderTokens(tokens) {
                     <span class="status ${token.enable ? 'enabled' : 'disabled'}">
                         ${token.enable ? '✅ 启用' : '❌ 禁用'}
                     </span>
+                    ${token.sub ? `<span class="status-subscription subscription-badge ${token.sub === 'free-tier' ? 'free-tier' : 'paid-tier'}" title="${escapeHtml(token.sub)}">${escapeHtml(formatSubTier(token.sub))}</span>` : ''}
+                    <span class="status-credits ${token.credits !== null && token.credits !== undefined ? (Number(token.credits) <= 0 ? 'credits-empty' : '') : 'no-credits'}" title="${token.credits !== null && token.credits !== undefined ? '剩余积分: ' + formatCredits(token.credits) : '无积分信息'}">🪙 ${formatCredits(token.credits)}</span>
                     <button class="btn-icon token-refresh-btn ${isRefreshing ? 'loading' : ''}" id="refresh-btn-${escapeHtml(cardId)}" onclick="manualRefreshToken('${safeTokenId}')" title="刷新Token" ${isRefreshing ? 'disabled' : ''}>🔄</button>
                 </div>
                 <div class="token-header-right">
@@ -1297,7 +1343,7 @@ async function toggleToken(tokenId, enable) {
         const data = await response.json();
         hideLoading();
         if (data.success) {
-            showToast(`已${action}`, 'success');
+            showToast(data.message || `已${action}`, data.syncedCredits === false ? 'warning' : 'success');
             skipAnimation = true; // 跳过动画
             loadTokens();
         } else {

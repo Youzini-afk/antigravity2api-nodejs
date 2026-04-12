@@ -130,11 +130,13 @@ class TokenValidator {
 
   /**
    * 验证 token 基本信息是否完整
+   * 只要求 refresh_token 必须存在（access_token 可自动刷新，
+   * expires_in/timestamp 缺失时视为已过期，触发自动刷新）
    * @param {Object} token - Token 对象
    * @returns {Object} 验证结果 {valid: boolean, missing: Array<string>}
    */
   validateTokenStructure(token) {
-    const requiredFields = ['access_token', 'refresh_token', 'expires_in', 'timestamp'];
+    const requiredFields = ['refresh_token'];
     const missing = [];
 
     for (const field of requiredFields) {

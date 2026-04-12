@@ -7,6 +7,7 @@ node_modules/
 # 日志
 *.log
 logs/
+.limcode
 
 # 环境变量
 .env

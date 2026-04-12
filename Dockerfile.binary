@@ -21,6 +21,7 @@ COPY dist/public /app/public
 COPY dist/bin /app/bin
 COPY dist/src/utils/proto /app/src/utils/proto
 COPY dist/config.json /app/config.json
+COPY dist/src/config/upstream.json /app/src/config/upstream.json
 
 # 设置执行权限
 RUN chmod +x /app/antigravity && \

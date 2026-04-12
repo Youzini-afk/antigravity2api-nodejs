@@ -1,7 +1,6 @@
-import axios from 'axios';
 import { log } from '../utils/logger.js';
 import config from '../config/config.js';
-import { buildAxiosRequestConfig } from '../utils/httpClient.js';
+import requesterManager from '../utils/requesterManager.js';
 
 /**
  * ProjectId 获取类
@@ -15,14 +14,95 @@ class ProjectIdFetcher {
   }
 
   /**
+   * 完整的账号验证流程（重构版）
+   * @param {Object} token - Token 对象
+   * @returns {Promise<{projectId: string|null, sub: string, hasQuota: boolean, source: string, isActivated: boolean, credits: number|null}>}
+   */
+  async validateAccount(token) {
+    const result = {
+      projectId: null,
+      sub: 'free-tier',
+      hasQuota: false,
+      source: 'none',
+      isActivated: false,
+      credits: null
+    };
+
+    // 步骤1: 尝试 loadCodeAssist
+    try {
+      const loadResult = await this._tryLoadCodeAssist(token);
+      
+      // 场景2/3: 已激活账号（loadCodeAssist 返回 currentTier 和 projectId）
+      if (loadResult?.projectId) {
+        result.projectId = loadResult.projectId;
+        result.sub = loadResult.sub;
+        result.hasQuota = true;
+        result.source = 'loadCodeAssist';
+        result.isActivated = true;
+        result.credits = loadResult.credits;
+        
+        log.info(`[validateAccount] 场景2/3: 已激活账号，sub=${result.sub}, credits=${result.credits}`);
+        return result;
+      }
+      
+      // loadCodeAssist 返回了 currentTier 但没有 projectId（异常情况）
+      if (loadResult?.sub && loadResult.sub !== 'free-tier') {
+        log.warn('[validateAccount] 账号已激活但无 projectId（异常）');
+        result.sub = loadResult.sub;
+        result.isActivated = true;
+        result.hasQuota = false;
+        return result;
+      }
+      
+    } catch (err) {
+      log.warn(`[validateAccount] loadCodeAssist 失败: ${err.message}`);
+    }
+
+    // 步骤2: loadCodeAssist 未返回有效结果，尝试 onboardUser
+    log.info('[validateAccount] loadCodeAssist 未激活，尝试 onboardUser');
+    
+    try {
+      const onboardResult = await this._tryOnboardUser(token);
+      
+      // 场景4: Pro账号未激活（onboardUser 可以获取 projectId）
+      if (onboardResult?.projectId) {
+        result.projectId = onboardResult.projectId;
+        result.sub = 'g1-pro-tier'; // Pro账号的默认订阅
+        result.hasQuota = true;
+        result.source = 'onboardUser';
+        result.isActivated = false;
+        
+        log.info('[validateAccount] 场景4: Pro未激活账号');
+        return result;
+      }
+      
+    } catch (err) {
+      log.warn(`[validateAccount] onboardUser 失败: ${err.message}`);
+    }
+
+    // 步骤3: 两种方式都失败，场景1: 普通未激活账号
+    log.info('[validateAccount] 场景1: 普通未激活账号（free-tier）');
+    result.sub = 'free-tier';
+    result.hasQuota = false;
+    result.source = 'none';
+    result.isActivated = false;
+    
+    return result;
+  }
+
+  /**
    * 获取 projectId（尝试两种方式）
    * @param {Object} token - Token 对象
    * @returns {Promise<{projectId: string|undefined, sub: string}>} projectId 和 sub
    */
   async fetchProjectId(token) {
+    let cachedCredits = null;
+
     // 步骤1: 尝试 loadCodeAssist
     try {
       const result = await this._tryLoadCodeAssist(token);
+      // 先缓存积分（即使 projectId 为空，积分信息也可能有效）
+      if (result?.credits != null) cachedCredits = result.credits;
       if (result?.projectId) {
         return result;
       }
@@ -35,20 +115,21 @@ class ProjectIdFetcher {
     try {
       const result = await this._tryOnboardUser(token);
       if (result?.projectId) {
+        if (cachedCredits != null) result.credits = cachedCredits;
         return result;
       }
       log.error('[fetchProjectId] loadCodeAssist 和 onboardUser 均未能获取 projectId');
-      return { projectId: undefined, sub: 'free-tier' };
+      return { projectId: undefined, sub: 'free-tier', credits: cachedCredits };
     } catch (err) {
       log.error(`[fetchProjectId] onboardUser 失败: ${err.message}`);
-      return { projectId: undefined, sub: 'free-tier' };
+      return { projectId: undefined, sub: 'free-tier', credits: cachedCredits };
     }
   }
 
   /**
    * 尝试通过 loadCodeAssist 获取 projectId
    * @param {Object} token - Token 对象
-   * @returns {Promise<{projectId: string, sub: string}|null>} projectId 和 sub 或 null
+   * @returns {Promise<{projectId: string|null, sub: string, isActivated: boolean, credits: number|null}|null>} projectId、sub、激活状态和积分
    * @private
    */
   async _tryLoadCodeAssist(token) {
@@ -63,9 +144,8 @@ class ProjectIdFetcher {
     };
 
     log.info(`[loadCodeAssist] 请求: ${requestUrl}`);
-    const response = await axios(buildAxiosRequestConfig({
+    const response = await requesterManager.fetch(requestUrl, {
       method: 'POST',
-      url: requestUrl,
       headers: {
         'Host': apiHost,
         'User-Agent': config.api.userAgent,
@@ -73,28 +153,55 @@ class ProjectIdFetcher {
         'Content-Type': 'application/json',
         'Accept-Encoding': 'gzip'
       },
-      data: JSON.stringify(requestBody),
-      timeout: this.timeout
-    }));
+      body: requestBody,
+      okStatus: [200]
+    });
 
     const data = response.data;
 
-    // 检查是否有 currentTier（表示用户已激活）
-    let sub = 'free-tier';
-    if (data?.currentTier) {
-      log.info('[loadCodeAssist] 用户已激活');
-      const projectId = data.cloudaicompanionProject;
-      if (projectId) {
-        log.info(`[loadCodeAssist] 成功获取 projectId: ${projectId}`);
-        sub = data.currentTier.id;
-        return { projectId, sub };
+    // 无条件提取积分信息
+    let credits = null;
+    // 调试：打印 paidTier 结构，排查积分提取问题
+    if (data?.paidTier) {
+      // log.info(`[loadCodeAssist] paidTier 原始数据: ${JSON.stringify(data.paidTier)}`);
+    }
+    const creditAmount = data?.paidTier?.availableCredits?.[0]?.creditAmount;
+    if (creditAmount != null) {
+      const parsed = Number(creditAmount);
+      if (Number.isFinite(parsed)) {
+        credits = parsed;
+        // log.info(`[loadCodeAssist] 获取到积分信息: ${credits}`);
       }
-      log.warn('[loadCodeAssist] 响应中无 projectId');
-      return null;
+    } else {
+      // log.info(`[loadCodeAssist] 未找到 creditAmount, paidTier 存在: ${!!data?.paidTier}, availableCredits: ${JSON.stringify(data?.paidTier?.availableCredits)}`);
     }
 
+    // 检查是否有 currentTier（表示用户已激活）
+    if (data?.currentTier) {
+      log.info('[loadCodeAssist] 用户已激活');
+      const projectId = data.cloudaicompanionProject || null;
+      let sub = data.currentTier.id || 'free-tier';
+      const sub2 = data.paidTier?.id;
+      if (sub2){
+        sub = sub2;
+      }
+      
+      return {
+        projectId,
+        sub,
+        isActivated: true,
+        credits
+      };
+    }
+
+    // 未激活
     log.info('[loadCodeAssist] 用户未激活 (无 currentTier)');
-    return null;
+    return {
+      projectId: null,
+      sub: 'free-tier',
+      isActivated: false,
+      credits
+    };
   }
 
   /**
@@ -131,9 +238,8 @@ class ProjectIdFetcher {
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       log.info(`[onboardUser] 轮询尝试 ${attempt}/${this.maxRetries}`);
 
-      const response = await axios(buildAxiosRequestConfig({
+      const response = await requesterManager.fetch(requestUrl, {
         method: 'POST',
-        url: requestUrl,
         headers: {
           'Host': apiHost,
           'User-Agent': config.api.userAgent,
@@ -141,9 +247,9 @@ class ProjectIdFetcher {
           'Content-Type': 'application/json',
           'Accept-Encoding': 'gzip'
         },
-        data: JSON.stringify(requestBody),
-        timeout: this.timeout
-      }));
+        body: requestBody,
+        okStatus: [200]
+      });
 
       const data = response.data;
 
@@ -197,9 +303,8 @@ class ProjectIdFetcher {
     log.info(`[_getOnboardTier] 请求: ${requestUrl}`);
 
     try {
-      const response = await axios(buildAxiosRequestConfig({
+      const response = await requesterManager.fetch(requestUrl, {
         method: 'POST',
-        url: requestUrl,
         headers: {
           'Host': apiHost,
           'User-Agent': config.api.userAgent,
@@ -207,9 +312,9 @@ class ProjectIdFetcher {
           'Content-Type': 'application/json',
           'Accept-Encoding': 'gzip'
         },
-        data: JSON.stringify(requestBody),
-        timeout: this.timeout
-      }));
+        body: requestBody,
+        okStatus: [200]
+      });
 
       const data = response.data;
 
@@ -239,6 +344,40 @@ class ProjectIdFetcher {
    */
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 专门获取积分和订阅信息
+   * @param {Object} token - Token 对象
+   * @returns {Promise<{sub: string, credits: number|null, isActivated: boolean}>}
+   */
+  async fetchSubscriptionAndCredits(token) {
+    const result = {
+      sub: 'free-tier',
+      credits: null,
+      isActivated: false,
+      fetched: false
+    };
+
+    try {
+      const loadResult = await this._tryLoadCodeAssist(token);
+      result.fetched = true;
+      
+      if (loadResult?.isActivated) {
+        result.sub = loadResult.sub || 'free-tier';
+        result.credits = loadResult.credits;
+        result.isActivated = true;
+        
+        log.info(`[fetchSubscriptionAndCredits] 订阅: ${result.sub}, 积分: ${result.credits}`);
+      } else {
+        log.info('[fetchSubscriptionAndCredits] 账号未激活，保持 free-tier');
+      }
+      
+      return result;
+    } catch (err) {
+      log.error(`[fetchSubscriptionAndCredits] 获取失败: ${err.message}`);
+      return result;
+    }
   }
 
   /**

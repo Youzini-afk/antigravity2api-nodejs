@@ -330,8 +330,38 @@
 
     /* Token卡片头部优化 */
     .token-header {
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        gap: 0.375rem;
+        align-items: center;
+    }
+
+    .token-header-left {
         gap: 0.25rem;
+        flex-wrap: nowrap;
+    }
+
+    .token-header-right {
+        gap: 0.25rem;
+    }
+
+    .status-subscription {
+        max-width: 4.25rem;
+        font-size: 0.6rem;
+        padding: 0.18rem 0.42rem;
+    }
+
+    .status-credits {
+        max-width: 5rem;
+        font-size: 0.65rem;
+        padding: 0.18rem 0.42rem;
+    }
+
+    .btn-icon,
+    .btn-icon.token-refresh-btn {
+        width: 22px;
+        height: 22px;
+        min-width: 22px;
+        min-height: 22px;
     }
 
     .status {
@@ -343,4 +373,4 @@
         font-size: 0.6rem;
     }
 }
-
+

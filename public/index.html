@@ -531,7 +531,7 @@
                                         <div class="form-row-inline switch-row">
                                             <div class="form-group compact switch-group">
                                                 <label>上下文System <span class="help-tip"
-                                                        data-tooltip="开启后，将用户请求的system消息追加到反代提示词后面">?</span></label>
+                                                        data-tooltip="开启后,将用户请求的system消息追加到反代提示词后面">?</span></label>
                                                 <label class="switch">
                                                     <input type="checkbox" name="USE_CONTEXT_SYSTEM_PROMPT"
                                                         id="useContextSystemPrompt"
@@ -541,7 +541,7 @@
                                             </div>
                                             <div class="form-group compact switch-group">
                                                 <label>合并提示词 <span class="help-tip"
-                                                        data-tooltip="开启后，将所有系统提示词合并为单个part（需要先开启上下文System）">?</span></label>
+                                                        data-tooltip="开启后,将所有系统提示词合并为单个part（需要先开启上下文System）">?</span></label>
                                                 <label class="switch">
                                                     <input type="checkbox" name="MERGE_SYSTEM_PROMPT"
                                                         id="mergeSystemPrompt" checked>
@@ -550,9 +550,19 @@
                                             </div>
                                             <div class="form-group compact switch-group">
                                                 <label>假非流 <span class="help-tip"
-                                                        data-tooltip="非流式请求使用流式获取数据，最终返回非流式格式的JSON（更快）">?</span></label>
+                                                        data-tooltip="非流式请求使用流式获取数据,最终返回非流式格式的JSON（更快）">?</span></label>
                                                 <label class="switch">
                                                     <input type="checkbox" name="FAKE_NON_STREAM" checked>
+                                                    <span class="slider"></span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="form-row-inline switch-row">
+                                            <div class="form-group compact switch-group">
+                                                <label>强制使用Credits <span class="help-tip"
+                                                        data-tooltip="开启后,所有请求都将使用Credits进行计费,而不是常规模型计费">?</span></label>
+                                                <label class="switch">
+                                                    <input type="checkbox" name="ALWAYS_USE_CREDITS">
                                                     <span class="slider"></span>
                                                 </label>
                                             </div>

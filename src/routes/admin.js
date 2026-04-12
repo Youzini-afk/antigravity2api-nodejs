@@ -475,6 +475,7 @@ router.post("/tokens", cookieAuthMiddleware, async (req, res) => {
     projectId,
     email,
     sub,
+    credits,
     useThreshold,
     allowBypassWithSpecialKey,
   } = req.body;
@@ -504,6 +505,7 @@ router.post("/tokens", cookieAuthMiddleware, async (req, res) => {
   if (useThreshold !== undefined) tokenData.useThreshold = useThreshold;
   if (allowBypassWithSpecialKey !== undefined)
     tokenData.allowBypassWithSpecialKey = allowBypassWithSpecialKey;
+  if (credits !== null && credits !== undefined) tokenData.credits = credits;
 
   try {
     const result = await tokenManager.addToken(tokenData);
@@ -573,22 +575,57 @@ router.post("/tokens/reload", cookieAuthMiddleware, async (req, res) => {
 });
 
 // 刷新指定Token的access_token（使用 tokenId）
-router.post(
-  "/tokens/:tokenId/refresh",
-  cookieAuthMiddleware,
-  async (req, res) => {
-    const { tokenId } = req.params;
+router.post('/tokens/:tokenId/refresh', cookieAuthMiddleware, async (req, res) => {
+  const { tokenId } = req.params;
+  try {
+    // 1. 刷新 access_token
+    const result = await tokenManager.refreshTokenById(tokenId);
+
+    // 2. 重新获取积分和订阅信息
     try {
-      const result = await tokenManager.refreshTokenById(tokenId);
-      logger.info(`手动刷新Token: ${tokenId}`);
-      res.json({ success: true, message: "Token刷新成功", data: result });
-    } catch (error) {
-      logger.error("刷新Token失败:", error.message);
-      const status = error.statusCode || 500;
-      res.status(status).json({ success: false, message: error.message });
+      const subscriptionInfo = await tokenManager.refreshSubscriptionAndCreditsById(tokenId);
+
+      if (subscriptionInfo.fetched === false) {
+        logger.warn('[刷新Token] 获取订阅和积分信息失败，保留现有数据');
+        return res.json({
+          success: true,
+          message: 'Token刷新成功（但获取订阅信息失败）',
+          data: {
+            ...result,
+            sub: subscriptionInfo.sub,
+            credits: subscriptionInfo.credits,
+            isActivated: subscriptionInfo.isActivated
+          }
+        });
+      }
+
+      logger.info(`[刷新Token] 已更新订阅和积分信息: sub=${subscriptionInfo.sub}, credits=${subscriptionInfo.credits}`);
+
+      res.json({
+        success: true,
+        message: 'Token刷新成功',
+        data: {
+          ...result,
+          sub: subscriptionInfo.sub,
+          credits: subscriptionInfo.credits,
+          isActivated: subscriptionInfo.isActivated
+        }
+      });
+    } catch (subscriptionError) {
+      // 即使获取订阅信息失败，token 刷新仍然成功
+      logger.warn(`获取订阅信息失败: ${subscriptionError.message}`);
+      res.json({
+        success: true,
+        message: 'Token刷新成功（但获取订阅信息失败）',
+        data: result
+      });
     }
-  },
-);
+  } catch (error) {
+    logger.error('刷新Token失败:', error.message);
+    const status = error.statusCode || 500;
+    res.status(status).json({ success: false, message: error.message });
+  }
+});
 
 // 手动获取指定Token的Project ID（使用 tokenId）
 router.post(
@@ -709,31 +746,101 @@ function findFieldByKeyword(obj, keyword) {
   return undefined;
 }
 
+function normalizeImportedTextValue(value) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return undefined;
+}
+
+function normalizeImportedProjectId(value) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'object') {
+    return normalizeImportedProjectId(value.id ?? value.projectId ?? value.name);
+  }
+  return normalizeImportedTextValue(value);
+}
+
+function normalizeImportedBoolean(value) {
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function parseImportedEnable(rawToken) {
+  let enable = findFieldByKeyword(rawToken, 'enable');
+  if (enable === undefined) enable = findFieldByKeyword(rawToken, 'enabled');
+
+  let disabled = findFieldByKeyword(rawToken, 'disable');
+  if (disabled === undefined) disabled = findFieldByKeyword(rawToken, 'disabled');
+
+  if (enable === undefined && disabled !== undefined) {
+    return !normalizeImportedBoolean(disabled);
+  }
+
+  if (enable === undefined) return true;
+  return normalizeImportedBoolean(enable);
+}
+
+function deriveImportedExpiresInAndTimestamp({ expires_in, expiry, timestamp }) {
+  const nowMs = Date.now();
+
+  let finalExpiresIn = null;
+  if (expires_in !== undefined && expires_in !== null && String(expires_in).trim() !== '') {
+    const parsed = parseInt(expires_in, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      finalExpiresIn = parsed;
+    }
+  }
+
+  let finalTimestamp;
+  if (finalExpiresIn === null && typeof expiry === 'string' && expiry.trim()) {
+    const expiryMs = Date.parse(expiry);
+    if (Number.isFinite(expiryMs)) {
+      finalExpiresIn = Math.max(1, Math.floor((expiryMs - nowMs) / 1000));
+      finalTimestamp = nowMs;
+    }
+  }
+
+  if (finalTimestamp === undefined) {
+    if (timestamp !== undefined && timestamp !== null && String(timestamp).trim() !== '') {
+      if (typeof timestamp === 'number') {
+        finalTimestamp = timestamp;
+      } else {
+        const parsedTimestamp = Date.parse(timestamp);
+        finalTimestamp = Number.isFinite(parsedTimestamp) ? parsedTimestamp : nowMs;
+      }
+    } else {
+      finalTimestamp = nowMs;
+    }
+  }
+
+  return {
+    expires_in: finalExpiresIn ?? 3599,
+    timestamp: finalTimestamp
+  };
+}
+
 // 智能解析单个 Token 对象
 function smartParseToken(rawToken) {
   if (!rawToken || typeof rawToken !== "object") return null;
 
-  // 必需字段：包含 refresh 的认为是 refresh_token，包含 project 的认为是 projectId
-  const refresh_token = findFieldByKeyword(rawToken, "refresh");
-  const projectId = findFieldByKeyword(rawToken, "project");
+  const refresh_token = normalizeImportedTextValue(findFieldByKeyword(rawToken, 'refresh'));
 
-  // 必须同时包含这两个字段
-  if (!refresh_token || !projectId) return null;
+  if (!refresh_token) return null;
 
-  // 构建标准化的 token 对象
-  const token = { refresh_token, projectId };
+  const token = { refresh_token };
 
-  // 可选字段自动获取
-  const access_token = findFieldByKeyword(rawToken, "access");
-  const email =
-    findFieldByKeyword(rawToken, "email") ||
-    findFieldByKeyword(rawToken, "mail");
-  const expires_in = findFieldByKeyword(rawToken, "expire");
-  const enable = findFieldByKeyword(rawToken, "enable");
-  const timestamp =
-    findFieldByKeyword(rawToken, "time") ||
-    findFieldByKeyword(rawToken, "stamp");
-  const hasQuota = findFieldByKeyword(rawToken, "quota");
+  const projectId = normalizeImportedProjectId(findFieldByKeyword(rawToken, 'project'));
+  const access_token = normalizeImportedTextValue(findFieldByKeyword(rawToken, 'access') || rawToken.token);
+  const email = normalizeImportedTextValue(findFieldByKeyword(rawToken, 'email') || findFieldByKeyword(rawToken, 'mail'));
+  const expires_in = findFieldByKeyword(rawToken, 'expires') || findFieldByKeyword(rawToken, 'expire');
+  const timestamp = findFieldByKeyword(rawToken, 'time') || findFieldByKeyword(rawToken, 'stamp') || findFieldByKeyword(rawToken, 'created');
+  const expiry = findFieldByKeyword(rawToken, 'expiry') || findFieldByKeyword(rawToken, 'expiresat');
+  const hasQuota = findFieldByKeyword(rawToken, 'quota');
   const useThreshold = parseOptionalBoolean(
     rawToken.useThreshold ??
       rawToken.use_threshold ??
@@ -744,20 +851,30 @@ function smartParseToken(rawToken) {
       rawToken.allow_bypass_with_special_key ??
       findFieldByKeyword(rawToken, "allowBypassWithSpecialKey"),
   );
+  const sub = normalizeImportedTextValue(findFieldByKeyword(rawToken, 'subscription') || findFieldByKeyword(rawToken, 'tier') || rawToken.sub);
+  const credits = findFieldByKeyword(rawToken, 'credit');
 
+  if (projectId) token.projectId = projectId;
   if (access_token) token.access_token = access_token;
   if (email) token.email = email;
-  if (expires_in !== undefined) token.expires_in = parseInt(expires_in) || 3599;
-  if (enable !== undefined)
-    token.enable = enable === true || enable === "true" || enable === 1;
-  if (timestamp)
-    token.timestamp =
-      typeof timestamp === "number" ? timestamp : new Date(timestamp).getTime();
-  if (hasQuota !== undefined)
-    token.hasQuota = hasQuota === true || hasQuota === "true" || hasQuota === 1;
+
+  const derived = deriveImportedExpiresInAndTimestamp({ expires_in, expiry, timestamp });
+  token.expires_in = derived.expires_in;
+  token.timestamp = derived.timestamp;
+  token.enable = parseImportedEnable(rawToken);
+
+  if (hasQuota !== undefined) token.hasQuota = normalizeImportedBoolean(hasQuota);
+  if (sub) token.sub = sub;
+  if (credits !== undefined && credits !== null && String(credits).trim() !== '') {
+    const parsedCredits = Number(credits);
+    if (Number.isFinite(parsedCredits)) {
+      token.credits = parsedCredits;
+    }
+  }
   if (useThreshold !== undefined) token.useThreshold = useThreshold;
-  if (allowBypassWithSpecialKey !== undefined)
+  if (allowBypassWithSpecialKey !== undefined) {
     token.allowBypassWithSpecialKey = allowBypassWithSpecialKey;
+  }
 
   return token;
 }
@@ -1920,93 +2037,92 @@ router.delete("/whitelist-ip", cookieAuthMiddleware, async (req, res) => {
 // ==================== Token 额度 API ====================
 
 // 获取指定Token的模型额度（使用 tokenId）
-router.get(
-  "/tokens/:tokenId/quotas",
-  cookieAuthMiddleware,
-  async (req, res) => {
-    try {
-      const { tokenId } = req.params;
-      const forceRefresh = req.query.refresh === "true";
+router.get('/tokens/:tokenId/quotas', cookieAuthMiddleware, async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const forceRefresh = req.query.refresh === 'true';
+    let subscriptionInfo = null;
 
-      // 通过 tokenId 查找完整的 token 数据
-      let tokenData = await tokenManager.findTokenById(tokenId);
+    // 通过 tokenId 查找完整的 token 数据
+    let tokenData = await tokenManager.findTokenById(tokenId);
 
-      if (!tokenData) {
-        return res.status(404).json({ success: false, message: "Token不存在" });
-      }
-
-      // 检查 token 是否禁用
-      const isDisabled = tokenData.enable === false;
-
-      // 使用 tokenId 作为缓存键，优先获取缓存数据
-      let quotaData = quotaManager.getQuota(tokenId);
-
-      // 禁用的 token 只返回缓存数据，不刷新也不获取新数据
-      if (isDisabled) {
-        if (!quotaData) {
-          // 没有缓存数据，返回空数据
-          quotaData = { lastUpdated: null, models: {} };
-        }
-      } else {
-        // 启用的 token 正常处理
-        // 检查token是否过期，如果过期则刷新
-        if (tokenManager.isExpired(tokenData)) {
-          try {
-            tokenData = await tokenManager.refreshToken(tokenData);
-          } catch (error) {
-            logger.error("刷新token失败:", error.message);
-            // 使用 400 而不是 401，避免前端误认为 JWT 登录过期
-            return res.status(400).json({
-              success: false,
-              message: "Google Token已过期且刷新失败，请重新登录Google账号",
-            });
-          }
-        }
-
-        // 强制刷新时清除缓存
-        if (forceRefresh) {
-          quotaData = null;
-        }
-
-        if (!quotaData) {
-          // 缓存未命中或强制刷新，从API获取
-          const quotas = await getModelsWithQuotas(tokenData);
-          quotaManager.updateQuota(tokenId, quotas);
-          // 从缓存中获取完整数据（包含 requestCounts），而不是构造不完整的对象
-          quotaData = quotaManager.getQuota(tokenId) || {
-            lastUpdated: Date.now(),
-            models: quotas,
-            requestCounts: {},
-          };
-        }
-      }
-
-      // 转换时间为北京时间
-      const modelsWithBeijingTime = {};
-      Object.entries(quotaData.models).forEach(([modelId, quota]) => {
-        modelsWithBeijingTime[modelId] = {
-          remaining: quota.r,
-          resetTime: quotaManager.convertToBeijingTime(quota.t),
-          resetTimeRaw: quota.t,
-        };
-      });
-
-      // 获取请求计数
-      const requestCounts = quotaData.requestCounts || {};
-
-      res.json({
-        success: true,
-        data: {
-          lastUpdated: quotaData.lastUpdated,
-          models: modelsWithBeijingTime,
-          requestCounts, // 返回请求计数供前端计算预估
-        },
-      });
-    } catch (error) {
-      logger.error("获取额度失败:", error.message);
-      res.status(500).json({ success: false, message: error.message });
+    if (!tokenData) {
+      return res.status(404).json({ success: false, message: "Token不存在" });
     }
-  },
-);
+
+    // 检查 token 是否禁用
+    const isDisabled = tokenData.enable === false;
+
+    // 使用 tokenId 作为缓存键，优先获取缓存数据
+    let quotaData = quotaManager.getQuota(tokenId);
+
+    // 禁用的 token 只返回缓存数据，不刷新也不获取新数据
+    if (isDisabled) {
+      if (!quotaData) {
+        quotaData = { lastUpdated: null, models: {}, requestCounts: {} };
+      }
+    } else {
+      if (tokenManager.isExpired(tokenData)) {
+        try {
+          tokenData = await tokenManager.refreshToken(tokenData);
+        } catch (error) {
+          logger.error("刷新token失败:", error.message);
+          return res.status(400).json({
+            success: false,
+            message: "Google Token已过期且刷新失败，请重新登录Google账号",
+          });
+        }
+      }
+
+      if (forceRefresh) {
+        quotaData = null;
+
+        try {
+          subscriptionInfo = await tokenManager.refreshSubscriptionAndCreditsById(tokenId);
+        } catch (subscriptionError) {
+          logger.warn(`刷新积分信息失败: ${subscriptionError.message}`);
+        }
+      }
+
+      if (!quotaData) {
+        const quotas = await getModelsWithQuotas(tokenData);
+        quotaManager.updateQuota(tokenId, quotas);
+        quotaData = quotaManager.getQuota(tokenId) || {
+          lastUpdated: Date.now(),
+          models: quotas,
+          requestCounts: {},
+        };
+      }
+    }
+
+    const modelsWithBeijingTime = {};
+    Object.entries(quotaData.models).forEach(([modelId, quota]) => {
+      modelsWithBeijingTime[modelId] = {
+        remaining: quota.r,
+        resetTime: quotaManager.convertToBeijingTime(quota.t),
+        resetTimeRaw: quota.t,
+      };
+    });
+
+    const requestCounts = quotaData.requestCounts || {};
+
+    res.json({
+      success: true,
+      data: {
+        lastUpdated: quotaData.lastUpdated,
+        models: modelsWithBeijingTime,
+        requestCounts, // 返回请求计数供前端计算预估
+        tokenMeta: subscriptionInfo ? {
+          sub: subscriptionInfo.sub,
+          credits: subscriptionInfo.credits,
+          isActivated: subscriptionInfo.isActivated
+        } : null
+      }
+    });
+  } catch (error) {
+    logger.error('获取额度失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 export default router;

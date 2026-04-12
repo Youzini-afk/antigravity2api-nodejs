@@ -58,7 +58,7 @@ export const handleOpenAIRequest = async (req, res) => {
 
     // 获取 tokenId 用于冷却状态管理
     const tokenId = await tokenManager.getTokenId(token);
-    
+
 
     // 创建刷新额度的回调函数
     const refreshQuota = async () => {
@@ -66,6 +66,13 @@ export const handleOpenAIRequest = async (req, res) => {
       const quotas = await getModelsWithQuotas(token);
       quotaManager.updateQuota(tokenId, quotas);
     };
+
+    const isImageModel = actualModel.includes('-image');
+    const requestBody = generateRequestBody(messages, actualModel, params, tools, token);
+
+    if (isImageModel) {
+      prepareImageRequest(requestBody);
+    }
 
     // 创建 with429Retry 选项
     const createRetryOptions = (prefix) => ({
@@ -77,13 +84,6 @@ export const handleOpenAIRequest = async (req, res) => {
       tokenManager,
       token
     });
-
-    const isImageModel = actualModel.includes('-image');
-    const requestBody = generateRequestBody(messages, actualModel, params, tools, token);
-
-    if (isImageModel) {
-      prepareImageRequest(requestBody);
-    }
     //console.log(JSON.stringify(requestBody,null,2));
     const { id, created } = createResponseMeta();
     const safeRetries = getSafeRetries(config.retryTimes);
@@ -97,7 +97,12 @@ export const handleOpenAIRequest = async (req, res) => {
       try {
         if (isImageModel) {
           const { content, usage, reasoningSignature } = await with429Retry(
-            () => generateAssistantResponseNoStream(requestBody, token),
+            (attempt, shouldUseCredits) => {
+              const actualRequestBody = shouldUseCredits
+                ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                : requestBody;
+              return generateAssistantResponseNoStream(actualRequestBody, token);
+            },
             safeRetries,
             createRetryOptions('chat.stream.image ')
           );
@@ -142,17 +147,28 @@ export const handleOpenAIRequest = async (req, res) => {
           if (useAntiTruncation) {
             // 抗截断模式：用 AntiTruncationStreamProcessor 包装流式请求
             const processor = new AntiTruncationStreamProcessor(
-              (payload, cb) => with429Retry(
-                () => generateAssistantResponse(payload, token, cb),
-                safeRetries,
-                createRetryOptions('chat.stream.anti_trunc ')
-              ),
+              (payload, cb) =>
+                with429Retry(
+                  (attempt, shouldUseCredits) => {
+                    const actualRequestBody = shouldUseCredits
+                      ? { ...payload, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                      : payload;
+                    return generateAssistantResponse(actualRequestBody, token, cb);
+                  },
+                  safeRetries,
+                  createRetryOptions('chat.stream.anti_trunc ')
+                ),
               requestBody
             );
             await processor.run(onStreamEvent);
           } else {
             await with429Retry(
-              () => generateAssistantResponse(requestBody, token, onStreamEvent),
+              (attempt, shouldUseCredits) => {
+                const actualRequestBody = shouldUseCredits
+                  ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                  : requestBody;
+                return generateAssistantResponse(actualRequestBody, token, onStreamEvent);
+              },
               safeRetries,
               createRetryOptions('chat.stream ')
             );
@@ -186,20 +202,25 @@ export const handleOpenAIRequest = async (req, res) => {
 
       try {
         await with429Retry(
-          () => generateAssistantResponse(requestBody, token, (data) => {
-            if (data.type === 'usage') {
-              usageData = data.usage;
-            } else if (data.type === 'reasoning') {
-              reasoningContent += data.reasoning_content || '';
-              if (data.thoughtSignature) {
-                reasoningSignature = data.thoughtSignature;
+          (attempt, shouldUseCredits) => {
+            const actualRequestBody = shouldUseCredits
+              ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+              : requestBody;
+            return generateAssistantResponse(actualRequestBody, token, (data) => {
+              if (data.type === 'usage') {
+                usageData = data.usage;
+              } else if (data.type === 'reasoning') {
+                reasoningContent += data.reasoning_content || '';
+                if (data.thoughtSignature) {
+                  reasoningSignature = data.thoughtSignature;
+                }
+              } else if (data.type === 'tool_calls') {
+                toolCalls.push(...data.tool_calls);
+              } else if (data.type === 'text') {
+                content += data.content || '';
               }
-            } else if (data.type === 'tool_calls') {
-              toolCalls.push(...data.tool_calls);
-            } else if (data.type === 'text') {
-              content += data.content || '';
-            }
-          }),
+            });
+          },
           safeRetries,
           createRetryOptions('chat.fake_no_stream ')
         );
@@ -242,7 +263,12 @@ export const handleOpenAIRequest = async (req, res) => {
       res.setTimeout(0); // 禁用响应超时
 
       const { content, reasoningContent, reasoningSignature, toolCalls, usage } = await with429Retry(
-        () => generateAssistantResponseNoStream(requestBody, token),
+        (attempt, shouldUseCredits) => {
+          const actualRequestBody = shouldUseCredits
+            ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+            : requestBody;
+          return generateAssistantResponseNoStream(actualRequestBody, token);
+        },
         safeRetries,
         createRetryOptions('chat.no_stream ')
       );

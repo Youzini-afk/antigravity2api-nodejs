@@ -34,28 +34,7 @@
   "api": {
     "use": "production",
     "version": "1.19.5",
-    "unleash": {
-      "register": "https://antigravity-unleash.goog/api/client/register",
-      "features": "https://antigravity-unleash.goog/api/client/features",
-      "frontend": "https://antigravity-unleash.goog/api/frontend"
-    },
-    "sandbox": {
-      "url": "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse",
-      "modelsUrl": "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels",
-      "noStreamUrl": "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
-      "host": "daily-cloudcode-pa.sandbox.googleapis.com",
-      "recordTrajectory": "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordTrajectoryAnalytics",
-      "recordCodeAssistMetrics": "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordCodeAssistMetrics"
-    },
-    "projectIdHost": "daily-cloudcode-pa.sandbox.googleapis.com",
-    "production": {
-      "url": "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
-      "modelsUrl": "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
-      "noStreamUrl": "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent",
-      "host": "daily-cloudcode-pa.googleapis.com",
-      "recordTrajectory": "https://daily-cloudcode-pa.googleapis.com/v1internal:recordTrajectoryAnalytics",
-      "recordCodeAssistMetrics": "https://daily-cloudcode-pa.googleapis.com/v1internal:recordCodeAssistMetrics"
-    }
+    "projectIdHost": "daily-cloudcode-pa.googleapis.com"
   },
   "defaults": {
     "temperature": 1,
@@ -82,7 +61,8 @@
     "cacheToolSignatures": true,
     "cacheImageSignatures": true,
     "cacheThinking": true,
-    "fakeNonStream": true
+    "fakeNonStream": true,
+    "alwaysUseCredits": false
   }
 ,
   "tokenMessages": {

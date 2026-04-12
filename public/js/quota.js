@@ -213,6 +213,65 @@ function summarizeGroup(items, requestCount = 0, groupKey = null) {
     };
 }
 
+function syncTokenMetaFromQuotaData(tokenId, quotaData) {
+    const tokenMeta = quotaData?.tokenMeta;
+    if (!tokenMeta || !Array.isArray(cachedTokens)) {
+        return;
+    }
+
+    const token = cachedTokens.find(item => item.id === tokenId);
+    if (!token) {
+        return;
+    }
+
+    token.sub = tokenMeta.sub ?? token.sub ?? null;
+    token.credits = tokenMeta.credits ?? null;
+
+    updateTokenCardMeta(tokenId, token);
+}
+
+function updateTokenCardMeta(tokenId, token) {
+    const cardId = tokenId.substring(0, 8);
+    const card = document.getElementById(`card-${cardId}`);
+    if (!card) return;
+
+    const headerLeft = card.querySelector('.token-header-left');
+    if (!headerLeft) return;
+
+    const refreshBtn = headerLeft.querySelector('.token-refresh-btn');
+    let subEl = headerLeft.querySelector('.status-subscription');
+    if (token.sub) {
+        if (!subEl) {
+            subEl = document.createElement('span');
+            if (refreshBtn) {
+                headerLeft.insertBefore(subEl, refreshBtn);
+            } else {
+                headerLeft.appendChild(subEl);
+            }
+        }
+        subEl.className = `status-subscription subscription-badge ${token.sub === 'free-tier' ? 'free-tier' : 'paid-tier'}`;
+        subEl.title = token.sub;
+        subEl.textContent = formatSubTier(token.sub);
+    } else if (subEl) {
+        subEl.remove();
+    }
+
+    let creditsEl = headerLeft.querySelector('.status-credits');
+    if (!creditsEl) {
+        creditsEl = document.createElement('span');
+        if (refreshBtn) {
+            headerLeft.insertBefore(creditsEl, refreshBtn);
+        } else {
+            headerLeft.appendChild(creditsEl);
+        }
+    }
+
+    const credits = token.credits;
+    creditsEl.className = `status-credits ${credits !== null && credits !== undefined ? (Number(credits) <= 0 ? 'credits-empty' : '') : 'no-credits'}`;
+    creditsEl.title = credits !== null && credits !== undefined ? `剩余积分: ${formatCredits(credits)}` : '无积分信息';
+    creditsEl.textContent = `🪙 ${formatCredits(credits)}`;
+}
+
 // 使用 tokenId 加载额度摘要
 async function loadTokenQuotaSummary(tokenId) {
     const cardId = tokenId.substring(0, 8);
@@ -394,6 +453,7 @@ async function refreshInlineQuota(cardId, tokenId) {
         const data = await response.json();
         if (data.success && data.data) {
             quotaCache.set(tokenId, data.data);
+            syncTokenMetaFromQuotaData(tokenId, data.data);
         }
     } catch (e) { }
 
@@ -541,6 +601,9 @@ async function loadQuotaData(tokenId, forceRefresh = false) {
 
         if (data.success) {
             quotaCache.set(tokenId, data.data);
+            if (forceRefresh) {
+                syncTokenMetaFromQuotaData(tokenId, data.data);
+            }
             renderQuotaModal(quotaContent, data.data);
         } else {
             quotaContent.innerHTML = `<div class="quota-error">加载失败: ${escapeHtml(data.message)}</div>`;
@@ -594,6 +657,7 @@ async function refreshAllQuotas() {
                 const data = await response.json();
                 if (data.success && data.data) {
                     quotaCache.set(token.id, data.data);
+                    syncTokenMetaFromQuotaData(token.id, data.data);
                 }
             } catch (e) {
                 // 单个 Token 刷新失败不影响其他
@@ -602,13 +666,13 @@ async function refreshAllQuotas() {
         });
 
         await Promise.all(refreshPromises);
+        await loadTokens();
 
-        // 重新渲染启用 token 的额度摘要
-        enabledTokens.forEach(token => {
-            loadTokenQuotaSummary(token.id);
-        });
+        if (currentQuotaToken) {
+            await loadQuotaData(currentQuotaToken);
+        }
 
-        showToast(`已刷新 ${enabledTokens.length} 个 Token 的额度`, 'success');
+        showToast(`已刷新 ${enabledTokens.length} 个 Token 的额度和积分`, 'success');
     } catch (error) {
         showToast('刷新额度失败: ' + error.message, 'error');
     } finally {

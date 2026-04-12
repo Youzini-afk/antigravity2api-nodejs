@@ -186,11 +186,12 @@ export function pushModelMessage({ parts, toolCalls, hasContent }, antigravityMe
  * @param {Object} options.generationConfig - 生成配置
  * @param {string} options.sessionId - 会话 ID
  * @param {string} options.systemInstruction - 系统指令
+ * @param {boolean} options.useCredits - 是否使用积分（可选，用于重试时强制使用积分）
  * @param {Object} token - Token 对象
  * @param {string} actualModelName - 实际模型名称
  * @returns {Object} 请求体
  */
-export function buildRequestBody({ contents, tools, generationConfig, sessionId, systemInstruction }, token, actualModelName) {
+export function buildRequestBody({ contents, tools, generationConfig, sessionId, systemInstruction, useCredits }, token, actualModelName) {
   const hasTools = tools && tools.length > 0;
 
   const requestBody = {
@@ -216,6 +217,11 @@ export function buildRequestBody({ contents, tools, generationConfig, sessionId,
   const systemInstructionObj = buildSystemInstruction(systemInstruction);
   if (systemInstructionObj) {
     requestBody.request.systemInstruction = systemInstructionObj;
+  }
+
+  // 积分使用逻辑：如果配置了 alwaysUseCredits 或者显式传入 useCredits 参数，则注入积分字段
+  if (config.alwaysUseCredits || useCredits === true) {
+    requestBody.enabledCreditTypes = ["GOOGLE_ONE_AI"];
   }
 
   return requestBody;
