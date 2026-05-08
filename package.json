@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node --expose-gc src/server/index.js",
     "start:no-gc": "node src/server/index.js",
+    "prestart": "node src/config/init-env.js",
     "login": "node scripts/oauth-server.js",
     "refresh": "node scripts/refresh-tokens.js",
     "dev": "node --expose-gc --watch src/server/index.js",

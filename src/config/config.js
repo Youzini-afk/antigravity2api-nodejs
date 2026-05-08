@@ -115,6 +115,19 @@ function displayGeneratedCredentials() {
 
 const { envPath, configJsonPath, configJsonExamplePath, upstreamJsonPath } = getConfigPaths();
 
+function getEnvNumber(key) {
+  const value = process.env[key];
+  if (value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function getEnvBoolean(key) {
+  const value = process.env[key];
+  if (value === undefined || value === '') return undefined;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+}
+
 // 默认反代系统提示词
 const DEFAULT_SYSTEM_INSTRUCTION = '你是聊天机器人，名字叫萌萌，如同名字这般，你的性格是软软糯糯萌萌哒的，专门为用户提供聊天和情绪价值，协助进行小说创作或者角色扮演';
 
@@ -378,8 +391,8 @@ export function buildConfig(jsonConfig, upstreamCfg = {}) {
 
   return {
     server: {
-      port: jsonConfig.server?.port || DEFAULT_SERVER_PORT,
-      host: jsonConfig.server?.host || DEFAULT_SERVER_HOST,
+      port: getEnvNumber('PORT') || jsonConfig.server?.port || DEFAULT_SERVER_PORT,
+      host: process.env.HOST || jsonConfig.server?.host || DEFAULT_SERVER_HOST,
       heartbeatInterval: jsonConfig.server?.heartbeatInterval || DEFAULT_HEARTBEAT_INTERVAL,
       // 内存定时清理频率：避免频繁扫描/GC 带来的性能损耗
       memoryCleanupInterval: jsonConfig.server?.memoryCleanupInterval ?? MEMORY_CLEANUP_INTERVAL
@@ -408,14 +421,14 @@ export function buildConfig(jsonConfig, upstreamCfg = {}) {
       thinking_budget: jsonConfig.defaults?.thinkingBudget ?? DEFAULT_GENERATION_PARAMS.thinking_budget
     },
     security: {
-      maxRequestSize: jsonConfig.server?.maxRequestSize || DEFAULT_MAX_REQUEST_SIZE,
+      maxRequestSize: process.env.MAX_REQUEST_SIZE || jsonConfig.server?.maxRequestSize || DEFAULT_MAX_REQUEST_SIZE,
       apiKey: getApiKey()
     },
     admin: getAdminCredentials(),
-    useNativeAxios: jsonConfig.other?.useNativeAxios !== false,
-    forceIPv4: jsonConfig.other?.forceIPv4 === true,
-    timeout: jsonConfig.other?.timeout || DEFAULT_TIMEOUT,
-    retryTimes: Number.isFinite(jsonConfig.other?.retryTimes) ? jsonConfig.other.retryTimes : DEFAULT_RETRY_TIMES,
+    useNativeAxios: getEnvBoolean('USE_NATIVE_AXIOS') ?? jsonConfig.other?.useNativeAxios !== false,
+    forceIPv4: getEnvBoolean('FORCE_IPV4') ?? jsonConfig.other?.forceIPv4 === true,
+    timeout: getEnvNumber('REQUEST_TIMEOUT') || jsonConfig.other?.timeout || DEFAULT_TIMEOUT,
+    retryTimes: getEnvNumber('RETRY_TIMES') ?? (Number.isFinite(jsonConfig.other?.retryTimes) ? jsonConfig.other.retryTimes : DEFAULT_RETRY_TIMES),
     proxy: getProxyConfig(),
     // 反代系统提示词（从 .env 读取，可在前端修改，空字符串代表不使用）
     systemInstruction: process.env.SYSTEM_INSTRUCTION ?? '',

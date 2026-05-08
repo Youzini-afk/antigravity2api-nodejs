@@ -1,12 +1,19 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
+
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=8045 \
+    CONFIG_DIR=/app/data \
+    DATA_DIR=/app/data \
+    IMAGE_DIR=/app/public/images
 
 # 复制 package.json 和 package-lock.json
 COPY package*.json ./
 
 # 安装依赖
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # 复制源代码
 COPY . .
@@ -21,4 +28,4 @@ RUN mkdir -p data public/images
 EXPOSE 8045
 
 # 启动应用
-CMD ["sh", "-c", "node src/config/init-env.js && npm start"]
+CMD ["npm", "start"]

@@ -11,6 +11,18 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const envProjectRoot = process.env.PROJECT_ROOT || process.env.APP_ROOT;
+const envDataDir = process.env.DATA_DIR;
+const envConfigDir = process.env.CONFIG_DIR;
+const envImageDir = process.env.IMAGE_DIR;
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
 /**
  * 检测是否在 pkg 打包环境中运行
  * @type {boolean}
@@ -22,6 +34,9 @@ export const isPkg = typeof process.pkg !== 'undefined';
  * @returns {string} 项目根目录路径
  */
 export function getProjectRoot() {
+  if (envProjectRoot) {
+    return path.resolve(envProjectRoot);
+  }
   if (isPkg) {
     return path.dirname(process.execPath);
   }
@@ -34,6 +49,9 @@ export function getProjectRoot() {
  * @returns {string} 数据目录路径
  */
 export function getDataDir() {
+  if (envDataDir) {
+    return ensureDir(path.resolve(envDataDir));
+  }
   if (isPkg) {
     // pkg 环境：优先使用可执行文件旁边的 data 目录
     const exeDir = path.dirname(process.execPath);
@@ -95,6 +113,9 @@ export function getPublicDir() {
  * @returns {string} 图片目录路径
  */
 export function getImageDir() {
+  if (envImageDir) {
+    return ensureDir(path.resolve(envImageDir));
+  }
   if (isPkg) {
     // pkg 环境：优先使用可执行文件旁边的 public/images 目录
     const exeDir = path.dirname(process.execPath);
@@ -131,6 +152,9 @@ export function getImageDir() {
  * @returns {string} .env 文件路径
  */
 export function getEnvPath() {
+  if (envConfigDir) {
+    return path.join(path.resolve(envConfigDir), '.env');
+  }
   if (isPkg) {
     // pkg 环境：优先使用可执行文件旁边的 .env
     const exeDir = path.dirname(process.execPath);
@@ -155,6 +179,18 @@ export function getEnvPath() {
  * @returns {{envPath: string, configJsonPath: string, configJsonExamplePath: string, examplePath: string, upstreamJsonPath: string}} 配置文件路径
  */
 export function getConfigPaths() {
+  if (envConfigDir) {
+    const configDir = ensureDir(path.resolve(envConfigDir));
+    const projectRoot = getProjectRoot();
+    return {
+      envPath: path.join(configDir, '.env'),
+      configJsonPath: path.join(configDir, 'config.json'),
+      configJsonExamplePath: path.join(projectRoot, 'config.json.example'),
+      examplePath: path.join(projectRoot, '.env.example'),
+      upstreamJsonPath: path.join(__dirname, '../config/upstream.json')
+    };
+  }
+
   if (isPkg) {
     // pkg 环境：优先使用可执行文件旁边的配置文件
     const exeDir = path.dirname(process.execPath);
