@@ -86,11 +86,11 @@ let modelListCacheTime = 0;
 
 // 默认模型列表（当 API 请求失败时使用）
 // 使用 Object.freeze 防止意外修改，并帮助 V8 优化
+// 只保留当前上游已确认可用的模型。不要在这里预置未开放的占位模型，
+// 否则客户端会展示出来但请求时上游返回 "Requested entity was not found"。
 const DEFAULT_MODELS = Object.freeze([
   'claude-opus-4-6',
   'claude-opus-4-6-thinking',
-  'claude-opus-4-7',
-  'claude-opus-4-7-thinking',
   'claude-sonnet-4-6',
   'claude-sonnet-4-6-thinking',
   'gemini-3.1-pro-high',
