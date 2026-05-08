@@ -18,9 +18,6 @@ RUN npm ci --omit=dev
 # 复制源代码
 COPY . .
 
-# 复制 .env.example 为默认 .env
-RUN cp .env.example .env
-
 # 创建数据和图片目录
 RUN mkdir -p data public/images
 
