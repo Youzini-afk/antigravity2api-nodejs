@@ -443,27 +443,29 @@
                                 <button class="btn btn-sm" style="background: var(--primary);" onclick="showMihomoImportModal()">📥 导入</button>
                             </div>
                         </div>
-                        <div class="mihomo-search-row">
-                            <div class="mihomo-search">
-                                <input type="text" id="mihomoSearchInput" placeholder="搜索节点..."
-                                    oninput="onMihomoSearch(this.value)">
-                            </div>
-                        </div>
                     </div>
 
                     <div class="mihomo-profiles-section">
                         <div class="mihomo-section-header">
-                            <div class="mihomo-section-title">📁 Profiles <span id="mihomoCurrentProfile" style="font-size:0.75rem;color:var(--text-light);font-weight:500;">当前: -</span></div>
+                            <div class="mihomo-section-title">📁 Profiles <span id="mihomoCurrentProfile">当前: -</span></div>
                         </div>
                         <div id="mihomoProfileList" class="mihomo-profile-list">
                             <div class="empty-state-small">加载中...</div>
                         </div>
                     </div>
 
-                    <div class="mihomo-groups" id="mihomoGroups">
-                        <div class="empty-state" style="padding:2rem;">
-                            <div class="empty-state-icon">🌐</div>
-                            <div class="empty-state-text">代理组加载中...</div>
+                    <!-- Clash Verge 风格：左侧组导航 + 右侧节点 -->
+                    <div class="mihomo-proxy-layout">
+                        <aside class="mihomo-group-nav" id="mihomoGroupNav">
+                            <div class="empty-state-small">加载中...</div>
+                        </aside>
+                        <div class="mihomo-proxy-main">
+                            <div class="mihomo-search-bar">
+                                <input type="text" id="mihomoSearchInput" placeholder="搜索当前组节点..."
+                                    oninput="onMihomoSearch(this.value)">
+                            </div>
+                            <div class="mihomo-group-header-card" id="mihomoGroupHeader"></div>
+                            <div class="mihomo-node-grid" id="mihomoNodeGrid"></div>
                         </div>
                     </div>
                 </div>

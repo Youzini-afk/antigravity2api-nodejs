@@ -1,9 +1,26 @@
-// Mihomo 代理管理页面
+// Mihomo 代理管理页面 — Clash Verge 风格
 
 let mihomoStatus = null;
 let mihomoProxies = null;
 let mihomoProfiles = null;
 let mihomoSearchQuery = '';
+let mihomoActiveGroup = '';
+
+const MIHOMO_GROUP_TYPES = new Set([
+    'Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay', 'Smart'
+]);
+
+function mihomoArg(value) {
+    return encodeURIComponent(String(value ?? '')).replace(/'/g, '%27');
+}
+
+function mihomoDecodeArg(value) {
+    try {
+        return decodeURIComponent(String(value ?? ''));
+    } catch {
+        return String(value ?? '');
+    }
+}
 
 // 初始化 Mihomo 页面
 function initMihomoPage() {
@@ -13,7 +30,8 @@ function initMihomoPage() {
     loadMihomoProxies();
 }
 
-// 加载状态
+/* ==================== 状态 ==================== */
+
 async function loadMihomoStatus() {
     try {
         const res = await authFetch('/admin/mihomo/status');
@@ -29,7 +47,6 @@ async function loadMihomoStatus() {
     }
 }
 
-// 渲染状态卡片
 function renderMihomoStatus() {
     const container = document.getElementById('mihomoStatusCards');
     if (!container || !mihomoStatus) return;
@@ -87,7 +104,8 @@ function renderMihomoStatus() {
     `;
 }
 
-// 启停/重启
+/* ==================== 启停 ==================== */
+
 async function startMihomo() {
     if (!mihomoProfiles) {
         showToast('Profile 信息仍在加载，请稍候', 'warning');
@@ -163,7 +181,8 @@ async function restartMihomo() {
     }
 }
 
-// Profile
+/* ==================== Profile ==================== */
+
 async function loadMihomoProfiles() {
     try {
         const res = await authFetch('/admin/mihomo/profiles');
@@ -173,7 +192,7 @@ async function loadMihomoProfiles() {
             renderMihomoProfiles();
         }
     } catch (err) {
-        // 静默失败，不影响主页面
+        // 静默失败
     }
 }
 
@@ -196,7 +215,7 @@ function renderMihomoProfiles() {
 
     list.innerHTML = profiles.map(p => {
         const isActive = p.name === activeName;
-        const metaParts = [p.source === 'url' ? 'URL 订阅' : '本地 YAML'];
+        const metaParts = [String(p.source || '').startsWith('url') ? 'URL 订阅' : '本地 YAML'];
         if (p.updatedAt) metaParts.push(new Date(p.updatedAt).toLocaleString());
         return `
             <div class="mihomo-profile-item ${isActive ? 'active' : ''}">
@@ -205,8 +224,8 @@ function renderMihomoProfiles() {
                     <div class="mihomo-profile-meta">${escapeHtml(metaParts.join(' · '))}</div>
                 </div>
                 <div class="mihomo-profile-actions">
-                    ${isActive ? '<span class="status enabled">当前</span>' : `<button class="btn btn-xs btn-success" onclick="switchMihomoProfile('${escapeJs(p.name)}')">切换</button>`}
-                    <button class="btn btn-xs btn-danger" onclick="deleteMihomoProfile('${escapeJs(p.name)}')">删除</button>
+                    ${isActive ? '<span class="status enabled">当前</span>' : `<button class="btn btn-xs btn-success" onclick="switchMihomoProfileByArg('${mihomoArg(p.name)}')">切换</button>`}
+                    <button class="btn btn-xs btn-danger" onclick="deleteMihomoProfileByArg('${mihomoArg(p.name)}')">删除</button>
                 </div>
             </div>
         `;
@@ -238,6 +257,10 @@ async function switchMihomoProfile(name) {
     }
 }
 
+function switchMihomoProfileByArg(name) {
+    return switchMihomoProfile(mihomoDecodeArg(name));
+}
+
 async function deleteMihomoProfile(name) {
     const confirmed = await showConfirm(`确定要删除 Profile "${name}" 吗？`, '删除确认');
     if (!confirmed) return;
@@ -258,7 +281,12 @@ async function deleteMihomoProfile(name) {
     }
 }
 
-// 导入模态框
+function deleteMihomoProfileByArg(name) {
+    return deleteMihomoProfile(mihomoDecodeArg(name));
+}
+
+/* ==================== 导入 ==================== */
+
 function showMihomoImportModal() {
     if (document.getElementById('mihomoImportModal')) return;
     const modal = document.createElement('div');
@@ -315,10 +343,7 @@ async function submitMihomoImport() {
     if (isUrl) {
         const name = document.getElementById('mihomoImportName').value.trim();
         const url = document.getElementById('mihomoImportUrl').value.trim();
-        if (!url) {
-            showToast('请输入订阅 URL', 'warning');
-            return;
-        }
+        if (!url) { showToast('请输入订阅 URL', 'warning'); return; }
         showLoading('正在导入...');
         try {
             const res = await authFetch('/admin/mihomo/profiles/import-url', {
@@ -331,12 +356,8 @@ async function submitMihomoImport() {
             if (result.success) {
                 showToast('导入成功', 'success');
                 document.getElementById('mihomoImportModal')?.remove();
-                if (result.data && result.data.status) {
-                    mihomoStatus = result.data.status;
-                    renderMihomoStatus();
-                }
-                loadMihomoProfiles();
-                loadMihomoProxies();
+                if (result.data?.status) { mihomoStatus = result.data.status; renderMihomoStatus(); }
+                loadMihomoProfiles(); loadMihomoProxies();
             } else {
                 showToast(result.message || '导入失败', 'error');
             }
@@ -347,10 +368,7 @@ async function submitMihomoImport() {
     } else {
         const name = document.getElementById('mihomoImportYamlName').value.trim();
         const content = document.getElementById('mihomoImportYamlContent').value;
-        if (!content.trim()) {
-            showToast('请输入 YAML 内容', 'warning');
-            return;
-        }
+        if (!content.trim()) { showToast('请输入 YAML 内容', 'warning'); return; }
         showLoading('正在导入...');
         try {
             const res = await authFetch('/admin/mihomo/profiles/import-yaml', {
@@ -363,12 +381,8 @@ async function submitMihomoImport() {
             if (result.success) {
                 showToast('导入成功', 'success');
                 document.getElementById('mihomoImportModal')?.remove();
-                if (result.data && result.data.status) {
-                    mihomoStatus = result.data.status;
-                    renderMihomoStatus();
-                }
-                loadMihomoProfiles();
-                loadMihomoProxies();
+                if (result.data?.status) { mihomoStatus = result.data.status; renderMihomoStatus(); }
+                loadMihomoProfiles(); loadMihomoProxies();
             } else {
                 showToast(result.message || '导入失败', 'error');
             }
@@ -379,58 +393,35 @@ async function submitMihomoImport() {
     }
 }
 
-// 代理
-async function loadMihomoProxies() {
-    const container = document.getElementById('mihomoGroups');
-    if (!container) return;
-    try {
-        const res = await authFetch('/admin/mihomo/proxies');
-        const result = await res.json();
-        if (result.success) {
-            mihomoProxies = result.data;
-            renderMihomoProxies();
-        } else {
-            container.innerHTML = `
-                <div class="empty-state" style="padding:2rem;">
-                    <div class="empty-state-icon">🌐</div>
-                    <div class="empty-state-text">代理信息不可用</div>
-                    <div class="empty-state-hint">${escapeHtml(result.message || 'Mihomo 可能未运行')}</div>
-                </div>
-            `;
-        }
-    } catch (err) {
-        container.innerHTML = `
-            <div class="empty-state" style="padding:2rem;">
-                <div class="empty-state-icon">🌐</div>
-                <div class="empty-state-text">加载代理失败</div>
-                <div class="empty-state-hint">${escapeHtml(err.message)}</div>
-            </div>
-        `;
-    }
+/* ==================== 代理组与节点（Clash Verge 风格） ==================== */
+
+function getGroupTypeColor(type) {
+    const map = {
+        'Selector': '#3b82f6',
+        'URLTest': '#f59e0b',
+        'Fallback': '#8b5cf6',
+        'LoadBalance': '#ec4899',
+        'Relay': '#14b8a6',
+        'Smart': '#22c55e',
+        'GLOBAL': '#64748b'
+    };
+    return map[type] || '#0891b2';
 }
 
-function renderMihomoProxies() {
-    const container = document.getElementById('mihomoGroups');
-    if (!container || !mihomoProxies || !mihomoProxies.proxies) return;
-
-    const all = mihomoProxies.proxies;
+function getProxyGroups() {
+    const all = mihomoProxies?.proxies || {};
     const groups = [];
-    const nodes = {};
-
     for (const key of Object.keys(all)) {
         const p = all[key];
         if (!p) continue;
-        if (['Selector', 'URLTest', 'Fallback', 'LoadBalance'].includes(p.type)) {
+        if (MIHOMO_GROUP_TYPES.has(p.type)) {
             groups.push(p);
-        } else {
-            nodes[key] = p;
         }
     }
-
-    const priorityNames = ['PROXY', 'Proxy', '🚀 节点选择', '节点选择', 'Auto', '自动选择'];
-    const displayGroups = groups.filter(g => g.name !== 'GLOBAL').sort((a, b) => {
-        const ai = priorityNames.indexOf(a.name);
-        const bi = priorityNames.indexOf(b.name);
+    const priority = ['GLOBAL', 'PROXY', 'Proxy', '🚀 节点选择', '节点选择', 'Auto', '自动选择', '♻️ 自动选择'];
+    return groups.sort((a, b) => {
+        const ai = priority.indexOf(a.name);
+        const bi = priority.indexOf(b.name);
         if (ai !== -1 || bi !== -1) {
             if (ai === -1) return 1;
             if (bi === -1) return -1;
@@ -438,68 +429,188 @@ function renderMihomoProxies() {
         }
         return String(a.name).localeCompare(String(b.name));
     });
+}
 
-    if (!displayGroups.length) {
-        container.innerHTML = '<div class="empty-state-small">暂无代理组</div>';
+async function loadMihomoProxies() {
+    try {
+        const res = await authFetch('/admin/mihomo/proxies');
+        const result = await res.json();
+        if (result.success) {
+            mihomoProxies = result.data;
+            const groups = getProxyGroups();
+            if (!mihomoActiveGroup && groups.length) {
+                mihomoActiveGroup = groups.find(g => g.name !== 'GLOBAL')?.name || groups[0]?.name;
+            }
+            if (groups.length && !groups.find(g => g.name === mihomoActiveGroup)) {
+                mihomoActiveGroup = groups[0]?.name || '';
+            }
+            renderMihomoGroupNav();
+            renderMihomoGroupContent();
+        } else {
+            document.getElementById('mihomoGroupNav').innerHTML = `
+                <div class="empty-state-small" style="padding:1rem;">${escapeHtml(result.message || '加载失败')}</div>`;
+            document.getElementById('mihomoGroupHeader').innerHTML = '';
+            document.getElementById('mihomoNodeGrid').innerHTML = '';
+        }
+    } catch (err) {
+        document.getElementById('mihomoGroupNav').innerHTML = `
+            <div class="empty-state-small" style="padding:1rem;">${escapeHtml(err.message)}</div>`;
+        document.getElementById('mihomoGroupHeader').innerHTML = '';
+        document.getElementById('mihomoNodeGrid').innerHTML = '';
+    }
+}
+
+function renderMihomoGroupNav() {
+    const nav = document.getElementById('mihomoGroupNav');
+    if (!nav || !mihomoProxies) return;
+    const groups = getProxyGroups();
+    if (!groups.length) {
+        nav.innerHTML = '<div class="empty-state-small" style="padding:1rem;">暂无代理组</div>';
         return;
     }
-
-    const query = mihomoSearchQuery.trim().toLowerCase();
-
-    let hasVisible = false;
-    const html = displayGroups.map(group => {
-        const nodeNames = (group.all || []).filter(n => n !== 'REJECT');
-        const filtered = query
-            ? nodeNames.filter(n => n.toLowerCase().includes(query))
-            : nodeNames;
-
-        if (query && !filtered.length) return '';
-        hasVisible = true;
-
-        const now = group.now || '';
-
+    nav.innerHTML = groups.map(g => {
+        const isActive = g.name === mihomoActiveGroup;
+        const color = getGroupTypeColor(g.type);
         return `
-            <div class="mihomo-group">
-                <div class="mihomo-group-header">
-                    <div class="mihomo-group-title">
-                        <span class="mihomo-group-badge">${escapeHtml(group.type)}</span>
-                        <span>${escapeHtml(group.name)}</span>
-                    </div>
-                    <div class="mihomo-group-meta">
-                        <span>当前: <span class="mihomo-group-current">${escapeHtml(now || '-')}</span></span>
-                        <button class="btn btn-xs btn-info" onclick="testMihomoGroupDelay('${escapeJs(group.name)}')">测速</button>
-                    </div>
-                </div>
-                <div class="mihomo-node-grid">
-                    ${filtered.map(nodeName => {
-                        const isActive = nodeName === now;
-                        const nodeInfo = nodes[nodeName] || all[nodeName];
-                        const delay = nodeInfo?.history?.[0]?.delay;
-                        const delayClass = delay && delay > 500 ? 'slow' : (delay && delay > 0 ? 'fast' : '');
-                        return `
-                            <div class="mihomo-node-card ${isActive ? 'active' : ''}"
-                                 onclick="selectMihomoProxy('${escapeJs(group.name)}', '${escapeJs(nodeName)}')">
-                                <div class="mihomo-node-name">${escapeHtml(nodeName)}</div>
-                                <div class="mihomo-node-meta">
-                                    <button class="mihomo-node-check" onclick="event.stopPropagation(); testMihomoNodeDelay('${escapeJs(nodeName)}')">测速</button>
-                                    ${delay ? `<span class="mihomo-node-delay ${delayClass}">${delay}ms</span>` : ''}
-                                    <span class="mihomo-node-type">${escapeHtml(nodeInfo?.type || 'Proxy')}</span>
-                                </div>
-                                ${isActive ? '<div class="mihomo-node-active-mark">✓</div>' : ''}
-                            </div>
-                        `;
-                    }).join('')}
+            <div class="mihomo-nav-item ${isActive ? 'active' : ''}"
+                 onclick="switchMihomoGroupByArg('${mihomoArg(g.name)}')"
+                 style="--group-accent:${color}">
+                <div class="mihomo-nav-name">${escapeHtml(g.name)}</div>
+                <div class="mihomo-nav-meta">
+                    <span class="mihomo-nav-badge" style="background:${color}">${escapeHtml(g.type)}</span>
+                    <span class="mihomo-nav-now">${escapeHtml(g.now || '-')}</span>
                 </div>
             </div>
         `;
     }).join('');
+}
 
-    container.innerHTML = hasVisible ? html : '<div class="empty-state-small">无匹配节点</div>';
+function switchMihomoGroup(name) {
+    mihomoActiveGroup = name;
+    mihomoSearchQuery = '';
+    const input = document.getElementById('mihomoSearchInput');
+    if (input) input.value = '';
+    renderMihomoGroupNav();
+    renderMihomoGroupContent();
+}
+
+function switchMihomoGroupByArg(name) {
+    return switchMihomoGroup(mihomoDecodeArg(name));
+}
+
+function renderMihomoGroupContent() {
+    const header = document.getElementById('mihomoGroupHeader');
+    const grid = document.getElementById('mihomoNodeGrid');
+    if (!header || !grid || !mihomoProxies || !mihomoActiveGroup) {
+        if (header) header.innerHTML = '';
+        if (grid) grid.innerHTML = '<div class="empty-state-small">请选择代理组</div>';
+        return;
+    }
+
+    const all = mihomoProxies.proxies;
+    const group = all[mihomoActiveGroup];
+    if (!group) {
+        header.innerHTML = '<div class="empty-state-small">组信息不存在</div>';
+        grid.innerHTML = '';
+        return;
+    }
+
+    const color = getGroupTypeColor(group.type);
+    const now = group.now || '';
+    const nodeNames = (group.all || []).filter(n => n !== 'REJECT');
+    const query = mihomoSearchQuery.trim().toLowerCase();
+    const filtered = query ? nodeNames.filter(n => n.toLowerCase().includes(query)) : nodeNames;
+
+    // 组标题卡片
+    header.innerHTML = `
+        <div class="mihomo-header-card">
+            <div class="mihomo-header-left">
+                <div class="mihomo-header-title">
+                    <span class="mihomo-header-badge" style="background:${color}">${escapeHtml(group.type)}</span>
+                    <span>${escapeHtml(group.name)}</span>
+                </div>
+                <div class="mihomo-header-sub">
+                    当前选中: <span class="mihomo-header-current">${escapeHtml(now || '-')}</span>
+                    · ${nodeNames.length} 节点
+                </div>
+            </div>
+            <div class="mihomo-header-right">
+                <button class="btn btn-xs btn-info" onclick="testMihomoGroupDelayByArg('${mihomoArg(group.name)}')">🔄 组测速</button>
+            </div>
+        </div>
+    `;
+
+    if (!filtered.length) {
+        grid.innerHTML = query
+            ? '<div class="empty-state-small" style="padding:2rem;">无匹配节点</div>'
+            : '<div class="empty-state-small" style="padding:2rem;">该组暂无可用节点</div>';
+        return;
+    }
+
+    const isGlobal = group.name === 'GLOBAL';
+
+    grid.innerHTML = filtered.map(nodeName => {
+        const nodeInfo = all[nodeName];
+        const isSubGroup = nodeInfo && MIHOMO_GROUP_TYPES.has(nodeInfo.type);
+        const isDirect = nodeName === 'DIRECT';
+        const isSelectable = group.type === 'Selector' || isGlobal;
+        const isActive = nodeName === now;
+        const delay = nodeInfo?.history?.[0]?.delay;
+        const delayNum = typeof delay === 'number' ? delay : null;
+        const delayClass = delayNum !== null && delayNum > 500 ? 'slow' : (delayNum !== null && delayNum >= 0 ? 'fast' : '');
+
+        if (isSubGroup) {
+            const subColor = getGroupTypeColor(nodeInfo.type);
+            return `
+                <div class="mihomo-node-card sub-group ${isActive ? 'active' : ''}"
+                     onclick="${isSelectable ? `selectMihomoProxyByArg('${mihomoArg(group.name)}', '${mihomoArg(nodeName)}')` : `switchMihomoGroupByArg('${mihomoArg(nodeName)}')`}">
+                    <div class="mihomo-node-name">${escapeHtml(nodeName)}</div>
+                    <div class="mihomo-node-meta">
+                        <div class="mihomo-node-tags">
+                            <span class="mihomo-node-tag" style="background:${subColor}22;color:${subColor}">${escapeHtml(nodeInfo.type)}</span>
+                        </div>
+                        <div class="mihomo-node-right">
+                            ${isSelectable ? `<button class="mihomo-node-check" onclick="event.stopPropagation(); selectMihomoProxyByArg('${mihomoArg(group.name)}', '${mihomoArg(nodeName)}')">选用</button>` : ''}
+                            <button class="mihomo-node-check" onclick="event.stopPropagation(); switchMihomoGroupByArg('${mihomoArg(nodeName)}')">进入</button>
+                        </div>
+                    </div>
+                    ${isActive ? '<div class="mihomo-node-active-mark">✓</div>' : ''}
+                </div>
+            `;
+        }
+
+        // 标签
+        const tags = [];
+        if (isDirect) tags.push({ text: 'DIRECT', cls: 'direct' });
+        if (nodeInfo?.type && !isDirect) tags.push({ text: nodeInfo.type, cls: 'type' });
+        if (nodeInfo?.udp) tags.push({ text: 'UDP', cls: 'udp' });
+        if (nodeInfo?.xudp) tags.push({ text: 'XUDP', cls: 'xudp' });
+
+        return `
+            <div class="mihomo-node-card ${isActive ? 'active' : ''} ${!isSelectable ? 'auto-group' : ''}"
+                 onclick="${isSelectable ? `selectMihomoProxyByArg('${mihomoArg(group.name)}', '${mihomoArg(nodeName)}')` : `testMihomoNodeDelayByArg('${mihomoArg(nodeName)}')`}">
+                <div class="mihomo-node-name">${escapeHtml(nodeName)}</div>
+                <div class="mihomo-node-meta">
+                    <div class="mihomo-node-tags">
+                        ${tags.map(t => `<span class="mihomo-node-tag ${t.cls}">${escapeHtml(t.text)}</span>`).join('')}
+                    </div>
+                    <div class="mihomo-node-right">
+                        ${delayNum !== null
+                            ? `<span class="mihomo-node-delay ${delayClass}">${delayNum}ms</span>`
+                            : '<span class="mihomo-node-delay empty">-</span>'}
+                        <button class="mihomo-node-check" onclick="event.stopPropagation(); testMihomoNodeDelayByArg('${mihomoArg(nodeName)}')">测速</button>
+                        ${!isSelectable ? '<span class="mihomo-auto-hint">自动组</span>' : ''}
+                    </div>
+                </div>
+                ${isActive ? '<div class="mihomo-node-active-mark">✓</div>' : ''}
+            </div>
+        `;
+    }).join('');
 }
 
 function onMihomoSearch(value) {
     mihomoSearchQuery = value;
-    renderMihomoProxies();
+    renderMihomoGroupContent();
 }
 
 async function selectMihomoProxy(group, name) {
@@ -514,9 +625,10 @@ async function selectMihomoProxy(group, name) {
         hideLoading();
         if (result.success) {
             showToast(`已切换到 ${name}`, 'success');
-            if (mihomoProxies && mihomoProxies.proxies && mihomoProxies.proxies[group]) {
+            if (mihomoProxies?.proxies?.[group]) {
                 mihomoProxies.proxies[group].now = name;
-                renderMihomoProxies();
+                renderMihomoGroupNav();
+                renderMihomoGroupContent();
             }
             setTimeout(() => loadMihomoProxies(), 800);
         } else {
@@ -528,6 +640,10 @@ async function selectMihomoProxy(group, name) {
     }
 }
 
+function selectMihomoProxyByArg(group, name) {
+    return selectMihomoProxy(mihomoDecodeArg(group), mihomoDecodeArg(name));
+}
+
 async function testMihomoGroupDelay(name) {
     showLoading('正在测速...');
     try {
@@ -535,7 +651,7 @@ async function testMihomoGroupDelay(name) {
         const result = await res.json();
         hideLoading();
         if (result.success) {
-            showToast(`${name} 延迟: ${result.data?.delay || '-'}ms`, 'info');
+            showToast(`${name} 延迟: ${result.data?.delay ?? '-'}ms`, 'info');
             loadMihomoProxies();
         } else {
             showToast(result.message || '测速失败', 'error');
@@ -546,12 +662,16 @@ async function testMihomoGroupDelay(name) {
     }
 }
 
+function testMihomoGroupDelayByArg(name) {
+    return testMihomoGroupDelay(mihomoDecodeArg(name));
+}
+
 async function testMihomoNodeDelay(name) {
     try {
         const res = await authFetch(`/admin/mihomo/proxies/${encodeURIComponent(name)}/delay?timeout=5000`);
         const result = await res.json();
         if (result.success) {
-            showToast(`${name} 延迟: ${result.data?.delay || '-'}ms`, 'info');
+            showToast(`${name} 延迟: ${result.data?.delay ?? '-'}ms`, 'info');
             loadMihomoProxies();
         } else {
             showToast(result.message || '测速失败', 'error');
@@ -561,6 +681,10 @@ async function testMihomoNodeDelay(name) {
     }
 }
 
+function testMihomoNodeDelayByArg(name) {
+    return testMihomoNodeDelay(mihomoDecodeArg(name));
+}
+
 function cleanupMihomoPage() {
-    // 如需定时器在此清理
+    // 预留
 }
