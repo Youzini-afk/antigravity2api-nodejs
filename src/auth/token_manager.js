@@ -215,7 +215,9 @@ class TokenManager {
    */
   async _syncMissingCreditsForEnabledTokens() {
     const candidates = this.tokens.filter(
-      (token) => token.enable !== false && (token.credits === null || token.credits === undefined),
+      (token) => token.enable !== false
+        && token.sub !== 'free-tier'
+        && (token.credits === null || token.credits === undefined),
     );
 
     if (candidates.length === 0) {
