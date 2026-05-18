@@ -5,9 +5,10 @@ import { getBinDir, getMihomoDir } from '../utils/paths.js';
 export function getMihomoPaths() {
   const rootDir = getMihomoDir();
   const profilesDir = path.join(rootDir, 'profiles');
+  const providersDir = path.join(rootDir, 'providers');
   const runtimeDir = path.join(rootDir, 'runtime');
 
-  for (const dir of [rootDir, profilesDir, runtimeDir]) {
+  for (const dir of [rootDir, profilesDir, providersDir, runtimeDir]) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -16,6 +17,7 @@ export function getMihomoPaths() {
   return {
     rootDir,
     profilesDir,
+    providersDir,
     runtimeDir,
     statePath: path.join(rootDir, 'state.json'),
     runtimeConfigPath: path.join(runtimeDir, 'mihomo.yaml')

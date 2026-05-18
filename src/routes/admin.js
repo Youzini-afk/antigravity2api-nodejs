@@ -689,7 +689,7 @@ router.put('/config', cookieAuthMiddleware, async (req, res) => {
     if (envUpdates) updateEnvFile(envPath, envUpdates);
     if (jsonUpdates) saveConfigJson(deepMerge(getConfigJson(), jsonUpdates));
 
-    dotenv.config({ override: true });
+    dotenv.config({ path: envPath, override: true });
     reloadConfig();
     await mihomoManager.onConfigUpdated(previousMihomoConfig);
 

@@ -326,8 +326,8 @@ npm run docker:build
 ```
 
 该命令会自动：
-- 从 `.env.example` 创建 `.env`（如果不存在）
-- 从 `config.json.example` 创建 `config.json`（如果不存在）
+- 从 `.env.example` 创建 `data/.env`（如果不存在）
+- 从 `config.json.example` 创建 `data/config.json`（如果不存在）
 - 创建必要的目录（`data/`、`public/images/`）
 - 执行 `docker-compose build` 构建镜像
 
@@ -355,11 +355,9 @@ docker compose down
 
 ```bash
 # 复制配置文件
-cp .env.example .env
-cp config.json.example config.json
-
-# 创建必要目录
 mkdir -p data public/images
+cp .env.example data/.env
+cp config.json.example data/config.json
 
 # 构建镜像
 docker build -t antigravity2api .
@@ -378,8 +376,6 @@ docker run -d \
   -e IMAGE_BASE_URL=http://your-domain.com \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/public/images:/app/public/images \
-  -v $(pwd)/.env:/app/.env \
-  -v $(pwd)/config.json:/app/config.json \
   antigravity2api
 ```
 
@@ -393,7 +389,7 @@ docker logs -f antigravity2api
 
 - 数据持久化：`data/` 目录挂载到容器，保存 Token 数据
 - 图片存储：`public/images/` 目录挂载到容器，保存生成的图片
-- 配置文件：`.env` 和 `config.json` 挂载到容器，支持热更新
+- 配置文件：Docker 环境默认读取 `data/.env` 和 `data/config.json`，管理后台修改也会写入 `data/`，支持热更新
 - 端口映射：默认映射 8045 端口，可根据需要修改
 - 自动重启：容器异常退出会自动重启
 
@@ -436,7 +432,7 @@ ghcr.io/liuw1535/antigravity2api-nodejs
 
 ⚠️ **重要提示**：
 - 只挂载 `/app/data` 和 `/app/public/images` 这两个目录
-- 不要挂载其他目录（如 `/app/.env`、`/app/config.json` 等），否则会导致必要配置文件被清空，项目无法启动
+- 不要挂载其他目录（如 `/app/.env`、`/app/config.json`、`/app/src/bin` 等），否则可能遮蔽镜像内文件；Zeabur/Docker 的 `.env`、`config.json` 会保存在 `/app/data`
 
 4. **绑定域名**
 
@@ -1043,7 +1039,7 @@ src/utils/toolConverter.js  # 统一的工具定义转换
 
 ## 注意事项
 
-1. 首次启动时会自动创建 `.env` 和 `config.json`（如果不存在）
+1. 首次启动时会自动创建 `.env` 和 `config.json`（Docker/Zeabur 中位于 `data/`）
 2. 如果未配置凭据，系统会自动生成随机凭据并在启动时显示
 3. 运行 `npm run login` 获取 Token
 4. `.env`、`config.json` 和 `data/accounts.json` 包含敏感信息，请勿泄露

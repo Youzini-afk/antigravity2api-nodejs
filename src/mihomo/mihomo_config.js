@@ -89,14 +89,12 @@ function extractNodeUris(content) {
     .filter((line) => line && NODE_URI_PATTERN.test(line));
 }
 
-export function buildHttpProviderProfile(subscriptionUrl) {
+export function buildFileProviderProfile(providerPath) {
   return YAML.stringify({
     'proxy-providers': {
       subscription: {
-        type: 'http',
-        url: subscriptionUrl,
-        interval: 3600,
-        path: './providers/subscription.yaml',
+        type: 'file',
+        path: providerPath,
         'health-check': {
           enable: true,
           interval: 600,
@@ -129,7 +127,7 @@ function buildProviderProfileFromRawSubscription(rawContent) {
   const nodeUris = extractNodeUris(uriContent);
   if (!nodeUris.length) return null;
 
-  throw new Error('当前内容是 URI 节点订阅，请使用 URL 导入，让 Mihomo 通过 proxy-provider 解析订阅');
+  throw new Error('当前内容是 URI/Base64 节点订阅，请使用 URL 导入');
 }
 
 export function normalizeProfileContent(content) {

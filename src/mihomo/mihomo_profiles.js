@@ -1,7 +1,9 @@
 import fs from 'fs/promises';
 import dns from 'dns/promises';
 import net from 'net';
-import { buildHttpProviderProfile, normalizeProfileContent, saveProfile, normalizeProfileName } from './mihomo_config.js';
+import path from 'path';
+import { buildFileProviderProfile, normalizeProfileContent, saveProfile, normalizeProfileName } from './mihomo_config.js';
+import { getMihomoPaths } from './mihomo_paths.js';
 import { patchMihomoState, readMihomoState } from './mihomo_state.js';
 
 function assertSafeSubscriptionUrl(rawUrl) {
@@ -102,8 +104,16 @@ async function upsertProfileMeta(profileMeta) {
   return profileMeta;
 }
 
+async function saveProviderContent(profileName, content) {
+  const { providersDir } = getMihomoPaths();
+  const providerPath = path.join(providersDir, `${normalizeProfileName(profileName)}.sub`);
+  await fs.writeFile(providerPath, String(content || '').trim(), 'utf8');
+  return providerPath;
+}
+
 export async function importProfileFromUrl({ name, url, mihomoConfig }) {
   const parsed = assertSafeSubscriptionUrl(url);
+  const safeName = normalizeProfileName(name || parsed.hostname || 'subscription');
   const content = await fetchTextWithLimit(parsed.toString(), {
     timeoutMs: mihomoConfig.downloadTimeoutMs,
     maxBytes: mihomoConfig.maxSubscriptionSizeBytes
@@ -113,11 +123,12 @@ export async function importProfileFromUrl({ name, url, mihomoConfig }) {
   try {
     normalizeProfileContent(content);
   } catch {
-    profileContent = buildHttpProviderProfile(parsed.toString());
-    source = 'url:provider';
+    const providerPath = await saveProviderContent(safeName, content);
+    profileContent = buildFileProviderProfile(providerPath);
+    source = 'url:file-provider';
   }
   const profile = await saveProfile({
-    name: normalizeProfileName(name || parsed.hostname || 'subscription'),
+    name: safeName,
     content: profileContent,
     source,
     url: parsed.toString()
@@ -150,6 +161,8 @@ export async function removeProfile(name) {
   if (target?.filePath) {
     await fs.unlink(target.filePath).catch(() => {});
   }
+  const { providersDir } = getMihomoPaths();
+  await fs.unlink(path.join(providersDir, `${safeName}.sub`)).catch(() => {});
   const profiles = state.profiles.filter((item) => item.name !== safeName);
   await patchMihomoState({
     profiles,

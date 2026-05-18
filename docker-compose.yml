@@ -16,6 +16,4 @@ services:
     volumes:
       - ./data:/app/data
       - ./public/images:/app/public/images
-      - ./.env:/app/.env
-      - ./config.json:/app/config.json
     restart: unless-stopped
