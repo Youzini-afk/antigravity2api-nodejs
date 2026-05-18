@@ -142,7 +142,15 @@ JWT_SECRET=your-jwt-secret-key-change-this-in-production
 
 管理后台新增「代理」页面，可导入 Clash/Mihomo 订阅 URL 或 YAML 配置，并像 Clash 客户端一样按代理组切换节点。启动 Mihomo 后，如果 `setAsProjectProxy=true`，项目上游请求会自动走内置代理端口。
 
-1. 准备 Mihomo 核心二进制，放到 `src/bin/`（源码运行）或程序同级 `bin/`（二进制部署）：
+Docker / Zeabur 部署会在镜像构建时自动下载 Linux Mihomo core（默认 `v1.19.25`），通常无需手动放置二进制。可通过构建参数调整：
+
+```bash
+docker build --build-arg MIHOMO_VERSION=v1.19.25 --build-arg MIHOMO_AMD64_COMPATIBLE=false -t antigravity .
+```
+
+如果 amd64 机器较老，可设置 `MIHOMO_AMD64_COMPATIBLE=true` 使用兼容版 core。
+
+非 Docker 部署时，准备 Mihomo 核心二进制，放到 `src/bin/`（源码运行）或程序同级 `bin/`（二进制部署）：
 
 | 平台 | 文件名 |
 |------|--------|
