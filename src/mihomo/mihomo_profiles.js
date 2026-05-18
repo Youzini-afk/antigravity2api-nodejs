@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import dns from 'dns/promises';
 import net from 'net';
-import { saveProfile, normalizeProfileName } from './mihomo_config.js';
+import { buildHttpProviderProfile, normalizeProfileContent, saveProfile, normalizeProfileName } from './mihomo_config.js';
 import { patchMihomoState, readMihomoState } from './mihomo_state.js';
 
 function assertSafeSubscriptionUrl(rawUrl) {
@@ -108,10 +108,18 @@ export async function importProfileFromUrl({ name, url, mihomoConfig }) {
     timeoutMs: mihomoConfig.downloadTimeoutMs,
     maxBytes: mihomoConfig.maxSubscriptionSizeBytes
   });
+  let profileContent = content;
+  let source = 'url';
+  try {
+    normalizeProfileContent(content);
+  } catch {
+    profileContent = buildHttpProviderProfile(parsed.toString());
+    source = 'url:provider';
+  }
   const profile = await saveProfile({
     name: normalizeProfileName(name || parsed.hostname || 'subscription'),
-    content,
-    source: 'url',
+    content: profileContent,
+    source,
     url: parsed.toString()
   });
   return upsertProfileMeta(profile);
