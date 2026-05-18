@@ -316,6 +316,65 @@ const DEFAULT_GEMINICLI_API_CONFIG = {
   userAgent: 'GeminiCLI/0.1.5 (Windows; AMD64)'
 };
 
+const DEFAULT_MIHOMO_CONFIG = Object.freeze({
+  enabled: false,
+  autoStart: true,
+  setAsProjectProxy: true,
+  mixedPort: 7897,
+  controllerHost: '127.0.0.1',
+  controllerPort: 9097,
+  secret: '',
+  profile: 'default',
+  selectedGroup: '',
+  healthCheckUrl: 'https://www.gstatic.com/generate_204',
+  startupTimeoutMs: 8000,
+  downloadTimeoutMs: 15000,
+  maxSubscriptionSizeBytes: 2 * 1024 * 1024,
+  binPath: ''
+});
+
+function normalizeMihomoConfig(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const mixedPort = Number(source.mixedPort);
+  const controllerPort = Number(source.controllerPort);
+  const startupTimeoutMs = Number(source.startupTimeoutMs);
+  const downloadTimeoutMs = Number(source.downloadTimeoutMs);
+  const maxSubscriptionSizeBytes = Number(source.maxSubscriptionSizeBytes);
+
+  return {
+    enabled: source.enabled === true,
+    autoStart: source.autoStart !== false,
+    setAsProjectProxy: source.setAsProjectProxy !== false,
+    mixedPort: Number.isInteger(mixedPort) && mixedPort > 0 && mixedPort < 65536
+      ? mixedPort
+      : DEFAULT_MIHOMO_CONFIG.mixedPort,
+    controllerHost: typeof source.controllerHost === 'string' && source.controllerHost.trim()
+      ? source.controllerHost.trim()
+      : DEFAULT_MIHOMO_CONFIG.controllerHost,
+    controllerPort: Number.isInteger(controllerPort) && controllerPort > 0 && controllerPort < 65536
+      ? controllerPort
+      : DEFAULT_MIHOMO_CONFIG.controllerPort,
+    secret: typeof source.secret === 'string' ? source.secret : '',
+    profile: typeof source.profile === 'string' && source.profile.trim()
+      ? source.profile.trim()
+      : DEFAULT_MIHOMO_CONFIG.profile,
+    selectedGroup: typeof source.selectedGroup === 'string' ? source.selectedGroup : '',
+    healthCheckUrl: typeof source.healthCheckUrl === 'string' && source.healthCheckUrl.trim()
+      ? source.healthCheckUrl.trim()
+      : DEFAULT_MIHOMO_CONFIG.healthCheckUrl,
+    startupTimeoutMs: Number.isFinite(startupTimeoutMs) && startupTimeoutMs >= 1000
+      ? Math.min(startupTimeoutMs, 60000)
+      : DEFAULT_MIHOMO_CONFIG.startupTimeoutMs,
+    downloadTimeoutMs: Number.isFinite(downloadTimeoutMs) && downloadTimeoutMs >= 1000
+      ? Math.min(downloadTimeoutMs, 60000)
+      : DEFAULT_MIHOMO_CONFIG.downloadTimeoutMs,
+    maxSubscriptionSizeBytes: Number.isFinite(maxSubscriptionSizeBytes) && maxSubscriptionSizeBytes >= 64 * 1024
+      ? Math.min(maxSubscriptionSizeBytes, 20 * 1024 * 1024)
+      : DEFAULT_MIHOMO_CONFIG.maxSubscriptionSizeBytes,
+    binPath: typeof source.binPath === 'string' ? source.binPath.trim() : ''
+  };
+}
+
 /**
  * 获取当前使用的 API 配置（Antigravity）
  * 优先级：upstream.json（只读，git 跟踪） > 代码内 DEFAULT_API_CONFIGS（hardcoded fallback）
@@ -385,9 +444,11 @@ function getGeminiCliApiConfig(jsonConfig, upstreamCfg) {
  */
 export function buildConfig(jsonConfig, upstreamCfg = {}) {
   const apiConfig = getActiveApiConfig(jsonConfig, upstreamCfg);
+  const mihomoConfig = normalizeMihomoConfig(jsonConfig.mihomo);
 
   // 官方系统提示词优先级：.env > upstream.json（默认值） > 代码硬编码
   const defaultOfficialPrompt = upstreamCfg.officialSystemPrompt || DEFAULT_OFFICIAL_SYSTEM_PROMPT;
+  const configuredProxy = getProxyConfig();
 
   return {
     server: {
@@ -429,7 +490,9 @@ export function buildConfig(jsonConfig, upstreamCfg = {}) {
     forceIPv4: getEnvBoolean('FORCE_IPV4') ?? jsonConfig.other?.forceIPv4 === true,
     timeout: getEnvNumber('REQUEST_TIMEOUT') || jsonConfig.other?.timeout || DEFAULT_TIMEOUT,
     retryTimes: getEnvNumber('RETRY_TIMES') ?? (Number.isFinite(jsonConfig.other?.retryTimes) ? jsonConfig.other.retryTimes : DEFAULT_RETRY_TIMES),
-    proxy: getProxyConfig(),
+    proxy: configuredProxy,
+    configuredProxy,
+    mihomo: mihomoConfig,
     // 反代系统提示词（从 .env 读取，可在前端修改，空字符串代表不使用）
     systemInstruction: process.env.SYSTEM_INSTRUCTION ?? '',
     // 官方系统提示词（从 .env 读取，可在前端修改，空字符串代表不使用）

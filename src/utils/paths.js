@@ -85,6 +85,35 @@ export function getDataDir() {
 }
 
 /**
+ * 获取内置 Mihomo 数据目录
+ * @returns {string} Mihomo 数据目录路径
+ */
+export function getMihomoDir() {
+  const dir = path.join(getDataDir(), 'mihomo');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+/**
+ * 获取内置二进制目录
+ * @returns {string} bin 目录路径
+ */
+export function getBinDir() {
+  if (isPkg) {
+    const exeDir = path.dirname(process.execPath);
+    const exeBinDir = path.join(exeDir, 'bin');
+    if (fs.existsSync(exeBinDir)) return exeBinDir;
+
+    const cwdBinDir = path.join(process.cwd(), 'bin');
+    if (fs.existsSync(cwdBinDir)) return cwdBinDir;
+  }
+
+  return path.join(__dirname, '..', 'bin');
+}
+
+/**
  * 获取公共静态文件目录
  * @returns {string} public 目录路径
  */

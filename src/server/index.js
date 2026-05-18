@@ -16,6 +16,7 @@ import { getPublicDir, getRelativePath } from '../utils/paths.js';
 import { errorHandler } from '../utils/errors.js';
 import { getChunkPoolSize, clearChunkPool } from './stream.js';
 import ipBlockManager from '../utils/ipBlockManager.js';
+import mihomoManager from '../mihomo/mihomo_manager.js';
 
 // 路由模块
 import adminRouter from '../routes/admin.js';
@@ -197,6 +198,8 @@ app.use((req, res, next) => {
 const server = app.listen(config.server.port, config.server.host, () => {
   logger.info(`服务器已启动: ${config.server.host}:${config.server.port}`);
 
+  mihomoManager.autoStart();
+
   // 启动时检查版本更新
   checkAndUpdateVersion();
 
@@ -224,12 +227,15 @@ server.on('error', (error) => {
 });
 
 // ==================== 优雅关闭 ====================
-const shutdown = () => {
+const shutdown = async () => {
   logger.info('正在关闭服务器...');
 
   // 停止内存管理器
   memoryManager.stop();
   logger.info('已停止内存管理器');
+
+  await mihomoManager.stop();
+  logger.info('已关闭 Mihomo 内核');
 
   // 关闭子进程请求器
   requesterManager.close();
