@@ -2347,3 +2347,460 @@ button.loading::after {
     color: white;
     transform: scale(1.1);
 }
+
+/* ==================== Mihomo 代理页面样式 ==================== */
+
+#mihomoPage {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+#mihomoPage.page-enter {
+    animation: pageSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mihomo-top-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    margin-bottom: 1rem;
+    border: 1.5px solid var(--border);
+    flex-shrink: 0;
+    z-index: 10;
+}
+
+@media (prefers-color-scheme: dark) {
+    .mihomo-top-bar {
+        background: rgba(30, 41, 59, 0.95);
+    }
+}
+
+.mihomo-status-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.mihomo-status-cards {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.mihomo-status-card {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1.5px solid var(--border);
+    border-radius: 0.625rem;
+    transition: all 0.2s ease;
+    min-width: 120px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .mihomo-status-card {
+        background: rgba(30, 41, 59, 0.85);
+    }
+}
+
+.mihomo-status-card.success {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.mihomo-status-card.danger {
+    border-color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.mihomo-status-card.warning {
+    border-color: var(--warning);
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.mihomo-status-card.info {
+    border-color: var(--info);
+    background: rgba(6, 182, 212, 0.1);
+}
+
+.mihomo-status-card.secondary {
+    border-color: var(--border);
+    opacity: 0.8;
+}
+
+.mihomo-status-icon {
+    font-size: 1.125rem;
+    line-height: 1;
+}
+
+.mihomo-status-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.mihomo-status-label {
+    font-size: 0.65rem;
+    color: var(--text-light);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.mihomo-status-value {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.mihomo-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.mihomo-actions .btn {
+    min-height: 32px;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+.mihomo-search-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.mihomo-search {
+    flex: 1;
+    min-width: 150px;
+}
+
+.mihomo-search input {
+    min-height: 32px;
+    font-size: 0.8rem;
+    padding-left: 0.75rem !important;
+}
+
+/* Profile 区域 */
+.mihomo-profiles-section {
+    margin-bottom: 1rem;
+    flex-shrink: 0;
+}
+
+.mihomo-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.mihomo-section-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.mihomo-profile-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.5rem;
+}
+
+.mihomo-profile-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.625rem 0.75rem;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1.5px solid var(--border);
+    border-radius: 0.5rem;
+    transition: all 0.2s ease;
+    animation: cardFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+
+@media (prefers-color-scheme: dark) {
+    .mihomo-profile-item {
+        background: rgba(30, 41, 59, 0.85);
+    }
+}
+
+.mihomo-profile-item:hover {
+    border-color: var(--primary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.mihomo-profile-item.active {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.08);
+}
+
+.mihomo-profile-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 0;
+}
+
+.mihomo-profile-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mihomo-profile-meta {
+    font-size: 0.7rem;
+    color: var(--text-light);
+}
+
+.mihomo-profile-actions {
+    display: flex;
+    gap: 0.375rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* 代理组 */
+.mihomo-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.mihomo-group {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1.5px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+    .mihomo-group {
+        background: rgba(30, 41, 59, 0.6);
+    }
+}
+
+.mihomo-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.mihomo-group-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.mihomo-group-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.25rem;
+    background: var(--primary);
+    color: white;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.mihomo-group-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-light);
+}
+
+.mihomo-group-current {
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.mihomo-node-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.5rem;
+}
+
+.mihomo-node-card {
+    position: relative;
+    padding: 0.625rem 0.75rem;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1.5px solid var(--border);
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    animation: cardFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+
+@media (prefers-color-scheme: dark) {
+    .mihomo-node-card {
+        background: rgba(30, 41, 59, 0.9);
+    }
+}
+
+.mihomo-node-card:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+    background: rgba(255, 255, 255, 0.98);
+}
+
+@media (prefers-color-scheme: dark) {
+    .mihomo-node-card:hover {
+        background: rgba(30, 41, 59, 0.97);
+    }
+}
+
+.mihomo-node-card.active {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.08);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
+}
+
+.mihomo-node-card.active:hover {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.12);
+}
+
+.mihomo-node-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mihomo-node-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.mihomo-node-type {
+    font-size: 0.65rem;
+    color: var(--text-light);
+    background: var(--bg);
+    padding: 0.1rem 0.375rem;
+    border-radius: 0.25rem;
+}
+
+.mihomo-node-check {
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.65);
+    color: var(--primary);
+    border-radius: 0.25rem;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.mihomo-node-check:hover {
+    border-color: var(--primary);
+    background: rgba(79, 70, 229, 0.1);
+    transform: translateY(-1px);
+}
+
+@media (prefers-color-scheme: dark) {
+    .mihomo-node-check {
+        background: rgba(15, 23, 42, 0.65);
+    }
+}
+
+.mihomo-node-delay {
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--success);
+}
+
+.mihomo-node-delay.slow {
+    color: var(--warning);
+}
+
+.mihomo-node-delay.fast {
+    color: var(--success);
+}
+
+.mihomo-node-active-mark {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.375rem;
+    font-size: 0.75rem;
+    color: var(--success);
+    font-weight: 700;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .mihomo-status-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .mihomo-actions {
+        width: 100%;
+    }
+
+    .mihomo-actions .btn {
+        flex: 1;
+    }
+
+    .mihomo-node-grid {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    }
+
+    .mihomo-group-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .mihomo-profile-list {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .mihomo-node-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

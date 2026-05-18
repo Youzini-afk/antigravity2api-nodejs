@@ -118,6 +118,11 @@ html.tab-logs .content {
     overflow: hidden;
 }
 
+/* Mihomo 页面时禁止 .content 滚动 */
+html.tab-mihomo .content {
+    overflow: hidden;
+}
+
 #tokensPage {
     display: flex;
     flex-direction: column;

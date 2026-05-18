@@ -15,21 +15,23 @@ initFilterState(); // 恢复筛选状态
         document.documentElement.classList.remove('auth-checking');
         document.documentElement.classList.add('auth-ready');
         
-        if (loggedIn) {
-            showMainContent();
-            // 恢复Tab状态，switchTab 内部会根据 tab 类型加载对应数据
-            const savedTab = localStorage.getItem('currentTab');
-            if (savedTab === 'settings') {
-                switchTab('settings', false);
-            } else if (savedTab === 'logs') {
-                switchTab('logs', false);
-            } else if (savedTab === 'geminicli') {
-                switchTab('geminicli', false);
-            } else {
-                // 默认显示 tokens 页面
-                switchTab('tokens', false);
+            if (loggedIn) {
+                showMainContent();
+                // 恢复Tab状态，switchTab 内部会根据 tab 类型加载对应数据
+                const savedTab = localStorage.getItem('currentTab');
+                if (savedTab === 'settings') {
+                    switchTab('settings', false);
+                } else if (savedTab === 'logs') {
+                    switchTab('logs', false);
+                } else if (savedTab === 'geminicli') {
+                    switchTab('geminicli', false);
+                } else if (savedTab === 'mihomo') {
+                    switchTab('mihomo', false);
+                } else {
+                    // 默认显示 tokens 页面
+                    switchTab('tokens', false);
+                }
             }
-        }
     } catch (e) {
         // 验证失败也要切换状态，显示登录框
         document.documentElement.classList.remove('auth-checking');

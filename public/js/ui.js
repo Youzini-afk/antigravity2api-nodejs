@@ -148,13 +148,15 @@ function hideLoading() {
 
 function switchTab(tab, saveState = true) {
     // 更新html元素的class以防止闪烁
-    document.documentElement.classList.remove('tab-settings', 'tab-logs', 'tab-geminicli');
+    document.documentElement.classList.remove('tab-settings', 'tab-logs', 'tab-geminicli', 'tab-mihomo');
     if (tab === 'settings') {
         document.documentElement.classList.add('tab-settings');
     } else if (tab === 'logs') {
         document.documentElement.classList.add('tab-logs');
     } else if (tab === 'geminicli') {
         document.documentElement.classList.add('tab-geminicli');
+    } else if (tab === 'mihomo') {
+        document.documentElement.classList.add('tab-mihomo');
     }
 
     // 移除所有tab的active状态
@@ -170,6 +172,7 @@ function switchTab(tab, saveState = true) {
     const settingsPage = document.getElementById('settingsPage');
     const logsPage = document.getElementById('logsPage');
     const geminicliPage = document.getElementById('geminicliPage');
+    const mihomoPage = document.getElementById('mihomoPage');
 
     // 隐藏所有页面并移除动画类
     tokensPage.classList.add('hidden');
@@ -183,6 +186,10 @@ function switchTab(tab, saveState = true) {
     if (geminicliPage) {
         geminicliPage.classList.add('hidden');
         geminicliPage.classList.remove('page-enter');
+    }
+    if (mihomoPage) {
+        mihomoPage.classList.add('hidden');
+        mihomoPage.classList.remove('page-enter');
     }
 
     // 清理日志页面的自动刷新（如果离开日志页面）
@@ -228,6 +235,17 @@ function switchTab(tab, saveState = true) {
                 initGeminiCliPage();
             }
         }
+    } else if (tab === 'mihomo') {
+        if (mihomoPage) {
+            mihomoPage.classList.remove('hidden');
+            // 触发重排以重新播放动画
+            void mihomoPage.offsetWidth;
+            mihomoPage.classList.add('page-enter');
+            // 进入 Mihomo 页面时加载数据
+            if (typeof initMihomoPage === 'function' && isLoggedIn) {
+                initMihomoPage();
+            }
+        }
     }
 
     // 保存当前Tab状态到localStorage
@@ -239,7 +257,7 @@ function switchTab(tab, saveState = true) {
 // 恢复Tab状态
 function restoreTabState() {
     const savedTab = localStorage.getItem('currentTab');
-    if (savedTab && (savedTab === 'tokens' || savedTab === 'settings' || savedTab === 'logs' || savedTab === 'geminicli')) {
+    if (savedTab && (savedTab === 'tokens' || savedTab === 'settings' || savedTab === 'logs' || savedTab === 'geminicli' || savedTab === 'mihomo')) {
         switchTab(savedTab, false);
     }
 }

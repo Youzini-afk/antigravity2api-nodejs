@@ -30,6 +30,10 @@ router.put('/config', async (req, res) => {
 
 router.post('/start', async (req, res) => {
   try {
+    if (!config.mihomo.enabled) {
+      saveConfigJson(deepMerge(getConfigJson(), { mihomo: { enabled: true } }));
+      reloadConfig();
+    }
     res.json({ success: true, data: await mihomoManager.start(req.body || {}) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -47,6 +51,11 @@ router.post('/stop', async (req, res) => {
 
 router.post('/restart', async (req, res) => {
   try {
+    const nextProfile = typeof req.body?.profile === 'string' ? req.body.profile.trim() : '';
+    const updates = { enabled: true };
+    if (nextProfile) updates.profile = nextProfile;
+    saveConfigJson(deepMerge(getConfigJson(), { mihomo: updates }));
+    reloadConfig();
     res.json({ success: true, data: await mihomoManager.restart(req.body || {}) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
