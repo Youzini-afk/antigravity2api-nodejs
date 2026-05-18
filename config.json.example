@@ -45,5 +45,20 @@
     "cacheThinking": true,
     "fakeNonStream": true,
     "alwaysUseCredits": false
+  },
+  "mihomo": {
+    "enabled": false,
+    "autoStart": true,
+    "setAsProjectProxy": true,
+    "mixedPort": 7897,
+    "controllerHost": "127.0.0.1",
+    "controllerPort": 9097,
+    "secret": "",
+    "profile": "default",
+    "healthCheckUrl": "https://www.gstatic.com/generate_204",
+    "startupTimeoutMs": 8000,
+    "downloadTimeoutMs": 15000,
+    "maxSubscriptionSizeBytes": 2097152,
+    "binPath": ""
   }
 }

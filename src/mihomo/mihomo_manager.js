@@ -120,6 +120,7 @@ class MihomoManager {
       lastStartedAt: this.startedAt,
       lastError: ''
     });
+    await this.restoreSelectedProxies();
     this.applyProjectProxy();
     logger.info(`Mihomo 已启动: 127.0.0.1:${mihomoConfig.mixedPort}`);
     return this.getStatus();
@@ -182,6 +183,22 @@ class MihomoManager {
       this.resetSecretCache();
       return this._startInternal(options);
     });
+  }
+
+  async restoreSelectedProxies() {
+    const state = await readMihomoState();
+    const selected = state.selected || {};
+    const entries = Object.entries(selected).filter(([group, name]) => group && name);
+    if (!entries.length) return;
+
+    const api = this.getApi();
+    for (const [group, name] of entries) {
+      try {
+        await api.selectProxy(group, name);
+      } catch (error) {
+        logger.debug(`恢复 Mihomo 节点选择失败 ${group} -> ${name}: ${error.message}`);
+      }
+    }
   }
 
   async onConfigUpdated(previousMihomoConfig = {}) {
