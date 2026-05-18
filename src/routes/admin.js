@@ -16,6 +16,8 @@ import logger from "../utils/logger.js";
 import memoryManager from "../utils/memoryManager.js";
 import { getEnvPath } from "../utils/paths.js";
 import { generateTokenId } from "../utils/idGenerator.js";
+import mihomoRouter from "./mihomo.js";
+import mihomoManager from "../mihomo/mihomo_manager.js";
 import { randomUUID } from "crypto";
 
 const envPath = getEnvPath();
@@ -117,6 +119,8 @@ const cookieAuthMiddleware = (req, res, next) => {
     return res.status(401).json({ error: "Invalid token" });
   }
 };
+
+router.use('/mihomo', cookieAuthMiddleware, mihomoRouter);
 
 // 获取客户端 IP
 function getClientIP(req) {
@@ -1193,9 +1197,10 @@ router.get("/config", cookieAuthMiddleware, (req, res) => {
 });
 
 // 更新配置
-router.put("/config", cookieAuthMiddleware, (req, res) => {
+router.put("/config", cookieAuthMiddleware, async (req, res) => {
   try {
     const { env: envUpdates, json: jsonUpdates, password } = req.body;
+    const previousMihomoConfig = { ...config.mihomo };
 
     // 轮询配置必须走 /admin/rotation，避免绕过参数校验
     if (jsonUpdates?.rotation !== undefined) {
@@ -1285,6 +1290,7 @@ router.put("/config", cookieAuthMiddleware, (req, res) => {
 
     dotenv.config({ path: envPath, override: true });
     reloadConfig();
+    await mihomoManager.onConfigUpdated(previousMihomoConfig);
 
     // 应用可热更新的运行时配置
     memoryManager.setCleanupInterval(config.server.memoryCleanupInterval);
@@ -1312,9 +1318,10 @@ router.get("/rotation", cookieAuthMiddleware, (req, res) => {
 });
 
 // 更新轮询策略配置
-router.put("/rotation", cookieAuthMiddleware, (req, res) => {
+router.put("/rotation", cookieAuthMiddleware, async (req, res) => {
   try {
     const { strategy, requestCount, thresholdPolicy } = req.body;
+    const previousMihomoConfig = { ...config.mihomo };
     const normalizedRequestCount =
       requestCount === undefined ? undefined : Number(requestCount);
 
@@ -1475,6 +1482,7 @@ router.put("/rotation", cookieAuthMiddleware, (req, res) => {
 
     // 重载配置到内存
     reloadConfig();
+    await mihomoManager.onConfigUpdated(previousMihomoConfig);
 
     // 同步 GeminiCLI 池的轮询/阈值配置（它从 config.json 的 rotation + geminicli.rotation 合并读取）
     geminicliTokenManager.loadRotationConfig();

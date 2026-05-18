@@ -19,6 +19,7 @@ import ipBlockManager from '../utils/ipBlockManager.js';
 import { resolveApiKeyAuth } from './api_key_auth.js';
 import { clientRestrictionMiddleware } from './client_restriction.js';
 import { requestInterceptionMiddleware } from './request_interception.js';
+import mihomoManager from '../mihomo/mihomo_manager.js';
 
 // 路由模块
 import adminRouter from '../routes/admin.js';
@@ -216,6 +217,8 @@ app.use(errorHandler);
 const server = app.listen(config.server.port, config.server.host, () => {
   logger.info(`服务器已启动: ${config.server.host}:${config.server.port}`);
 
+  mihomoManager.autoStart();
+
   // 启动时检查版本更新
   checkAndUpdateVersion();
 
@@ -243,7 +246,7 @@ server.on('error', (error) => {
 });
 
 // ==================== 优雅关闭 ====================
-const shutdown = () => {
+const shutdown = async () => {
   logger.info('正在关闭服务器...');
 
   // 停止内存管理器
@@ -251,6 +254,9 @@ const shutdown = () => {
   logger.info('已停止内存管理器');
 
   // 关闭子进程请求器
+  await mihomoManager.stop();
+  logger.info('已关闭 Mihomo 内核');
+
   requesterManager.close();
   logger.info('已关闭子进程请求器');
 
