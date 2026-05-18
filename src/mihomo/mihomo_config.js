@@ -3,6 +3,8 @@ import path from 'path';
 import YAML from 'yaml';
 import { getMihomoPaths } from './mihomo_paths.js';
 
+const NODE_URI_PATTERN = /^(ss|ssr|vmess|vless|trojan|hysteria|hysteria2|hy2|tuic|wireguard):\/\//i;
+
 function normalizeProfileName(name) {
   return String(name || 'default')
     .trim()
@@ -61,6 +63,100 @@ export function buildRuntimeConfig(profileContent, mihomoConfig, secret) {
   return YAML.stringify(data, { lineWidth: 0 });
 }
 
+function isProbablyBase64(content) {
+  const compact = String(content || '').replace(/\s+/g, '');
+  return compact.length > 16 && /^[A-Za-z0-9+/=_-]+$/.test(compact) && compact.length % 4 !== 1;
+}
+
+function decodeBase64Subscription(content) {
+  const compact = String(content || '').replace(/\s+/g, '');
+  const normalized = compact.replace(/-/g, '+').replace(/_/g, '/');
+  try {
+    const decoded = Buffer.from(normalized, 'base64').toString('utf8').trim();
+    if (decoded && decoded !== content && NODE_URI_PATTERN.test(decoded.split(/\r?\n/).find(Boolean) || decoded)) {
+      return decoded;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function extractNodeUris(content) {
+  return String(content || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && NODE_URI_PATTERN.test(line));
+}
+
+export function buildHttpProviderProfile(subscriptionUrl) {
+  return YAML.stringify({
+    'proxy-providers': {
+      subscription: {
+        type: 'http',
+        url: subscriptionUrl,
+        interval: 3600,
+        path: './providers/subscription.yaml',
+        'health-check': {
+          enable: true,
+          interval: 600,
+          url: 'https://www.gstatic.com/generate_204'
+        }
+      }
+    },
+    'proxy-groups': [
+      {
+        name: 'PROXY',
+        type: 'select',
+        use: ['subscription'],
+        proxies: ['DIRECT']
+      },
+      {
+        name: 'Auto',
+        type: 'url-test',
+        use: ['subscription'],
+        url: 'https://www.gstatic.com/generate_204',
+        interval: 300
+      }
+    ],
+    rules: ['MATCH,PROXY']
+  }, { lineWidth: 0 });
+}
+
+function buildProviderProfileFromRawSubscription(rawContent) {
+  const decoded = isProbablyBase64(rawContent) ? decodeBase64Subscription(rawContent) : null;
+  const uriContent = decoded || rawContent;
+  const nodeUris = extractNodeUris(uriContent);
+  if (!nodeUris.length) return null;
+
+  throw new Error('当前内容是 URI 节点订阅，请使用 URL 导入，让 Mihomo 通过 proxy-provider 解析订阅');
+}
+
+export function normalizeProfileContent(content) {
+  const raw = String(content || '').trim();
+  if (!raw) throw new Error('订阅内容为空');
+
+  try {
+    buildRuntimeConfig(raw, {
+      mixedPort: 7897,
+      controllerHost: '127.0.0.1',
+      controllerPort: 9097
+    }, 'validation');
+    return { content: raw, format: 'yaml' };
+  } catch (yamlError) {
+    const converted = buildProviderProfileFromRawSubscription(raw);
+    if (converted) {
+      buildRuntimeConfig(converted, {
+        mixedPort: 7897,
+        controllerHost: '127.0.0.1',
+        controllerPort: 9097
+      }, 'validation');
+      return { content: converted, format: 'uri' };
+    }
+    throw yamlError;
+  }
+}
+
 export async function writeRuntimeConfig(profileName, mihomoConfig, secret) {
   const { runtimeConfigPath } = getMihomoPaths();
   const profileContent = await readProfileYaml(profileName);
@@ -71,17 +167,13 @@ export async function writeRuntimeConfig(profileName, mihomoConfig, secret) {
 
 export async function saveProfile({ name, content, source = 'local', url = '' }) {
   const safeName = normalizeProfileName(name);
-  buildRuntimeConfig(content, {
-    mixedPort: 7897,
-    controllerHost: '127.0.0.1',
-    controllerPort: 9097
-  }, 'validation');
+  const normalized = normalizeProfileContent(content);
 
   const filePath = getProfilePath(safeName);
-  await fs.writeFile(filePath, content, 'utf8');
+  await fs.writeFile(filePath, normalized.content, 'utf8');
   return {
     name: safeName,
-    source,
+    source: normalized.format === 'yaml' ? source : `${source}:${normalized.format}`,
     url,
     filePath,
     updatedAt: new Date().toISOString()
