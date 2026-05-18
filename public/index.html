@@ -14,6 +14,7 @@
             var classes = ['auth-checking'];
             if (currentTab === 'settings') classes.push('tab-settings');
             if (currentTab === 'logs') classes.push('tab-logs');
+            if (currentTab === 'mihomo') classes.push('tab-mihomo');
             document.documentElement.className = classes.join(' ');
             // 检测字体加载
             if ('fonts' in document) {
@@ -171,6 +172,79 @@
             color: var(--text-light, #888) !important;
         }
 
+        html.tab-settings #mihomoPage {
+            display: none !important;
+        }
+
+        html.tab-settings .tab[data-tab="mihomo"] {
+            background: transparent !important;
+            color: var(--text-light, #888) !important;
+        }
+
+        html.tab-logs #mihomoPage {
+            display: none !important;
+        }
+
+        html.tab-logs .tab[data-tab="mihomo"] {
+            background: transparent !important;
+            color: var(--text-light, #888) !important;
+        }
+
+        html.tab-geminicli #mihomoPage {
+            display: none !important;
+        }
+
+        html.tab-geminicli .tab[data-tab="mihomo"] {
+            background: transparent !important;
+            color: var(--text-light, #888) !important;
+        }
+
+        /* Mihomo Tab 状态 */
+        html.tab-mihomo #tokensPage {
+            display: none !important;
+        }
+
+        html.tab-mihomo #settingsPage {
+            display: none !important;
+        }
+
+        html.tab-mihomo #logsPage {
+            display: none !important;
+        }
+
+        html.tab-mihomo #geminicliPage {
+            display: none !important;
+        }
+
+        html.tab-mihomo #mihomoPage {
+            display: flex !important;
+        }
+
+        html.tab-mihomo .tab[data-tab="tokens"] {
+            background: transparent !important;
+            color: var(--text-light, #888) !important;
+        }
+
+        html.tab-mihomo .tab[data-tab="settings"] {
+            background: transparent !important;
+            color: var(--text-light, #888) !important;
+        }
+
+        html.tab-mihomo .tab[data-tab="logs"] {
+            background: transparent !important;
+            color: var(--text-light, #888) !important;
+        }
+
+        html.tab-mihomo .tab[data-tab="geminicli"] {
+            background: transparent !important;
+            color: var(--text-light, #888) !important;
+        }
+
+        html.tab-mihomo .tab[data-tab="mihomo"] {
+            background: var(--primary, #4f46e5) !important;
+            color: white !important;
+        }
+
         /* 加载指示器样式 */
         #authLoading {
             display: none;
@@ -254,6 +328,8 @@
                         class="tab-icon">🎯</span><span class="tab-text">Token</span></button>
                 <button class="tab" data-tab="geminicli" onclick="switchTab('geminicli')"><span
                         class="tab-icon">💎</span><span class="tab-text">CLI</span></button>
+                <button class="tab" data-tab="mihomo" onclick="switchTab('mihomo')"><span
+                        class="tab-icon">🌐</span><span class="tab-text">代理</span></button>
                 <button class="tab" data-tab="settings" onclick="switchTab('settings')"><span
                         class="tab-icon">⚙️</span><span class="tab-text">设置</span></button>
                 <button class="tab" data-tab="logs" onclick="switchTab('logs')"><span
@@ -351,6 +427,46 @@
                             <div class="empty-state-icon">📦</div>
                             <div class="empty-state-text">暂无Gemini CLI Token</div>
                             <div class="empty-state-hint">点击上方OAuth按钮添加Token</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mihomo 代理页面 -->
+                <div id="mihomoPage" class="hidden">
+                    <div class="mihomo-top-bar">
+                        <div class="mihomo-status-row">
+                            <div id="mihomoStatusCards" class="mihomo-status-cards">
+                                <!-- 状态卡片由 JS 渲染 -->
+                            </div>
+                            <div class="mihomo-actions">
+                                <button class="btn btn-success btn-sm" onclick="startMihomo()">▶️ 启动</button>
+                                <button class="btn btn-danger btn-sm" onclick="stopMihomo()">⏹️ 停止</button>
+                                <button class="btn btn-warning btn-sm" onclick="restartMihomo()">🔄 重启</button>
+                                <button class="btn btn-info btn-sm" onclick="loadMihomoStatus(); loadMihomoProfiles(); loadMihomoProxies();">↻ 刷新</button>
+                                <button class="btn btn-sm" style="background: var(--primary);" onclick="showMihomoImportModal()">📥 导入</button>
+                            </div>
+                        </div>
+                        <div class="mihomo-search-row">
+                            <div class="mihomo-search">
+                                <input type="text" id="mihomoSearchInput" placeholder="搜索节点..."
+                                    oninput="onMihomoSearch(this.value)">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mihomo-profiles-section">
+                        <div class="mihomo-section-header">
+                            <div class="mihomo-section-title">📁 Profiles <span id="mihomoCurrentProfile" style="font-size:0.75rem;color:var(--text-light);font-weight:500;">当前: -</span></div>
+                        </div>
+                        <div id="mihomoProfileList" class="mihomo-profile-list">
+                            <div class="empty-state-small">加载中...</div>
+                        </div>
+                    </div>
+
+                    <div class="mihomo-groups" id="mihomoGroups">
+                        <div class="empty-state" style="padding:2rem;">
+                            <div class="empty-state-icon">🌐</div>
+                            <div class="empty-state-text">代理组加载中...</div>
                         </div>
                     </div>
                 </div>
@@ -1025,6 +1141,7 @@
     <script src="js/quota.js" defer></script>
     <script src="js/tokens.js" defer></script>
     <script src="js/geminicli.js" defer></script>
+    <script src="js/mihomo.js" defer></script>
     <script src="js/config.js" defer></script>
     <script src="js/security.js" defer></script>
     <script src="js/logs.js" defer></script>
