@@ -35,6 +35,7 @@
 - ✅ 多 API 格式支持（OpenAI、Gemini、Claude 三种格式）
 - ✅ 转换器代码复用（公共模块提取，减少重复代码）
 - ✅ 动态内存阈值（根据用户配置自动计算各级别阈值）
+- ✅ 内置 Mihomo 代理管理（订阅 URL 导入、节点切换、项目代理一键接管）
 
 ## 环境要求
 
@@ -138,6 +139,50 @@ JWT_SECRET=your-jwt-secret-key-change-this-in-production
 # PROXY=http://127.0.0.1:7890
 # SYSTEM_INSTRUCTION=你是聊天机器人
 # IMAGE_BASE_URL=http://your-domain.com
+```
+
+#### 内置 Mihomo 代理（可选）
+
+管理后台新增「代理」页面，可导入 Clash/Mihomo 订阅 URL 或 YAML 配置，并像 Clash 客户端一样按代理组切换节点。启动 Mihomo 后，如果 `setAsProjectProxy=true`，项目上游请求会自动走内置代理端口。
+
+1. 准备 Mihomo 核心二进制，放到 `src/bin/`（源码运行）或程序同级 `bin/`（二进制部署）：
+
+| 平台 | 文件名 |
+|------|--------|
+| Windows x64 | `mihomo-windows-amd64.exe` |
+| Linux x64 | `mihomo-linux-amd64` |
+| Linux ARM64 | `mihomo-linux-arm64` |
+| macOS x64 | `mihomo-darwin-amd64` |
+| macOS ARM64 | `mihomo-darwin-arm64` |
+
+也可以在 `config.json` 的 `mihomo.binPath` 指定自定义路径。
+
+2. 登录管理后台，打开「代理」页。
+3. 点击「导入」，选择 URL 订阅或 YAML 内容。
+4. 点击「启动」或「重启」，等待状态变为运行中。
+5. 在代理组卡片中搜索、测速并点击节点完成切换。
+
+默认安全策略：
+- 控制接口只监听 `127.0.0.1`。
+- 强制 `allow-lan: false`。
+- 导入运行配置时会覆盖/移除端口、TUN、listener 等高风险字段。
+- URL 导入会拒绝本机/内网/云元数据地址。
+
+示例配置：
+
+```json
+{
+  "mihomo": {
+    "enabled": false,
+    "autoStart": true,
+    "setAsProjectProxy": true,
+    "mixedPort": 7897,
+    "controllerHost": "127.0.0.1",
+    "controllerPort": 9097,
+    "profile": "default",
+    "binPath": ""
+  }
+}
 ```
 
 #### 3. 登录获取 Token
@@ -1044,4 +1089,3 @@ src/utils/toolConverter.js  # 统一的工具定义转换
 ## License
 
 MIT
-

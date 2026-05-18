@@ -73,6 +73,14 @@ const binFileMap = {
   'node18-macos-arm64': 'fingerprint_android_arm64'
 };
 
+const mihomoBinFileMap = {
+  'node18-win-x64': 'mihomo-windows-amd64.exe',
+  'node18-linux-x64': 'mihomo-linux-amd64',
+  'node18-linux-arm64': 'mihomo-linux-arm64',
+  'node18-macos-x64': 'mihomo-darwin-amd64',
+  'node18-macos-arm64': 'mihomo-darwin-arm64'
+};
+
 console.log('📦 Step 1: Bundling with esbuild...');
 
 // 使用 esbuild 打包成 CommonJS
@@ -241,8 +249,8 @@ try {
 
     // 只复制对应平台的 bin 文件
     const targetBinFiles = isMultiTarget
-      ? [...new Set(targets.map(t => binFileMap[t]).filter(Boolean))]  // 多目标：去重后的所有文件
-      : [binFileMap[resolvedTarget]].filter(Boolean);  // 单目标：只复制一个文件
+      ? [...new Set(targets.flatMap(t => [binFileMap[t], mihomoBinFileMap[t]]).filter(Boolean))]  // 多目标：去重后的所有文件
+      : [binFileMap[resolvedTarget], mihomoBinFileMap[resolvedTarget]].filter(Boolean);  // 单目标：只复制对应文件
 
     if (targetBinFiles.length > 0) {
       for (const binFile of targetBinFiles) {
