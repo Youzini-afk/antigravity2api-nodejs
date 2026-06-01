@@ -19,7 +19,7 @@ function convertSingleTool(name, description, parameters, sessionId, actualModel
     setToolNameMapping(actualModelName, safeName, originalName);
   }
   
-  const rawParams = parameters || {};
+  const rawParams = parseToolParameters(parameters) || {};
   const cleanedParams = cleanParameters(rawParams) || {};
   // 使用大写 OBJECT 以匹配官方 API 格式
   if (cleanedParams.type === undefined) cleanedParams.type = 'OBJECT';
@@ -31,6 +31,26 @@ function convertSingleTool(name, description, parameters, sessionId, actualModel
     description: description || '',
     parameters: cleanedParams
   };
+}
+
+function parseToolParameters(parameters) {
+  if (!parameters) return {};
+  if (typeof parameters !== 'string') return parameters;
+  try {
+    const parsed = JSON.parse(parameters);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getToolParameters(tool, fallbackParams) {
+  if (fallbackParams) return fallbackParams;
+  return tool?.parameters || tool?.input_schema || tool?.jsonSchema || tool?.json_schema || tool?.jsonSchemaString || tool?.json_schema_string;
+}
+
+function getToolDescription(tool, fallbackDescription = '') {
+  return tool?.description || fallbackDescription || '';
 }
 
 /**
@@ -47,9 +67,9 @@ export function convertOpenAIToolsToAntigravity(openaiTools, sessionId, actualMo
   const declarations = openaiTools.map((tool) => {
     const func = tool.function || {};
     return convertSingleTool(
-      func.name,
-      func.description,
-      func.parameters,
+      func.name || tool.name,
+      getToolDescription(func, tool.description),
+      getToolParameters(func, getToolParameters(tool)),
       sessionId,
       actualModelName
     );
@@ -75,7 +95,7 @@ export function convertClaudeToolsToAntigravity(claudeTools, sessionId, actualMo
     return convertSingleTool(
       tool.name,
       tool.description,
-      tool.input_schema,
+      getToolParameters(tool, tool.input_schema),
       sessionId,
       actualModelName
     );
@@ -107,7 +127,7 @@ export function convertGeminiToolsToAntigravity(geminiTools, sessionId, actualMo
       // 收集所有声明
       for (const fd of declarations) {
         allDeclarations.push(
-          convertSingleTool(fd.name, fd.description, fd.parameters, sessionId, actualModelName)
+          convertSingleTool(fd.name, fd.description, getToolParameters(fd, fd.parameters), sessionId, actualModelName)
         );
       }
     }
@@ -117,7 +137,7 @@ export function convertGeminiToolsToAntigravity(geminiTools, sessionId, actualMo
         convertSingleTool(
           tool.name,
           tool.description,
-          tool.parameters || tool.input_schema,
+          getToolParameters(tool),
           sessionId,
           actualModelName
         )

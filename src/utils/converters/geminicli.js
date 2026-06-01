@@ -10,8 +10,8 @@
  */
 
 import config from '../../config/config.js';
-import { convertClaudeToolsToAntigravity, convertGeminiToolsToAntigravity } from '../toolConverter.js';
-import { sanitizeToolName, cleanParameters, modelMapping, isEnableThinking } from '../utils.js';
+import { convertOpenAIToolsToAntigravity, convertClaudeToolsToAntigravity, convertGeminiToolsToAntigravity } from '../toolConverter.js';
+import { sanitizeToolName, modelMapping, isEnableThinking } from '../utils.js';
 import { normalizeOpenAIParameters, normalizeClaudeParameters, normalizeGeminiParameters, toGenerationConfig } from '../parameterNormalizer.js';
 import {
   getSignatureContext,
@@ -341,30 +341,8 @@ function convertMessages(messages, enableThinking = false, actualModelName = '',
  * @param {Array} tools - OpenAI 格式的工具数组
  * @returns {Array} Gemini 格式的工具数组
  */
-function convertTools(tools) {
-  if (!tools || tools.length === 0) return [];
-  
-  const declarations = tools.map(tool => {
-    const func = tool.function || {};
-    const rawParams = func.parameters || {};
-    const cleanedParams = cleanParameters(rawParams) || {};
-    
-    if (cleanedParams.type === undefined) cleanedParams.type = 'OBJECT';
-    else if (cleanedParams.type === 'object') cleanedParams.type = 'OBJECT';
-    if ((cleanedParams.type === 'OBJECT' || cleanedParams.type === 'object') && cleanedParams.properties === undefined) {
-      cleanedParams.properties = {};
-    }
-    
-    return {
-      name: sanitizeToolName(func.name),
-      description: func.description || '',
-      parameters: cleanedParams
-    };
-  });
-  
-  return [{
-    functionDeclarations: declarations
-  }];
+function convertTools(tools, actualModelName) {
+  return convertOpenAIToolsToAntigravity(tools, null, actualModelName);
 }
 
 /**
@@ -436,7 +414,7 @@ export function convertOpenAIToGeminiCli(openaiRequest) {
   }
   
   // 转换工具（需要在转换消息前完成，以便判断 hasTools）
-  const geminiTools = convertTools(tools);
+  const geminiTools = convertTools(tools, actualModelName);
   const hasTools = geminiTools.length > 0;
   
   // 转换消息（传入签名相关参数）
@@ -720,29 +698,8 @@ function extractClaudeContent(content) {
  * @param {Array} tools - Claude 格式的工具数组
  * @returns {Array} Gemini 格式的工具数组
  */
-function convertClaudeTools(tools) {
-  if (!tools || tools.length === 0) return [];
-  
-  const declarations = tools.map(tool => {
-    const rawParams = tool.input_schema || {};
-    const cleanedParams = cleanParameters(rawParams) || {};
-    
-    if (cleanedParams.type === undefined) cleanedParams.type = 'OBJECT';
-    else if (cleanedParams.type === 'object') cleanedParams.type = 'OBJECT';
-    if ((cleanedParams.type === 'OBJECT' || cleanedParams.type === 'object') && cleanedParams.properties === undefined) {
-      cleanedParams.properties = {};
-    }
-    
-    return {
-      name: sanitizeToolName(tool.name),
-      description: tool.description || '',
-      parameters: cleanedParams
-    };
-  });
-  
-  return [{
-    functionDeclarations: declarations
-  }];
+function convertClaudeTools(tools, actualModelName) {
+  return convertClaudeToolsToAntigravity(tools, null, actualModelName);
 }
 
 /**
@@ -921,7 +878,7 @@ export function convertClaudeToGeminiCli(claudeRequest) {
   }
   
   // 转换工具
-  const geminiTools = convertClaudeTools(tools);
+  const geminiTools = convertClaudeTools(tools, actualModelName);
   const hasTools = geminiTools.length > 0;
   
   // 转换消息

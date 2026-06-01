@@ -36,17 +36,34 @@ export function sanitizeToolName(name) {
   return cleaned;
 }
 
-// ==================== 参数清理 ====================
-const EXCLUDED_KEYS = new Set([
-  '$schema', 'additionalProperties', 'minLength', 'maxLength',
-  'minItems', 'maxItems', 'uniqueItems', 'exclusiveMaximum',
-  'exclusiveMinimum', 'const', 'anyOf', 'oneOf', 'allOf',
-  'any_of', 'one_of', 'all_of', 'multipleOf',
-  // Gemini API 不支持的高级 JSON Schema 字段
-  'propertyNames', 'patternProperties', 'dependencies',
-  'if', 'then', 'else', 'not', 'contentMediaType', 'contentEncoding',
-  'definitions', '$defs', '$ref', '$id', '$comment', 'undefined'
+// ==================== Gemini 工具参数 Schema 清理 ====================
+// Gemini FunctionDeclaration.parameters 接受的是 Google Schema（OpenAPI 3.0 子集），
+// 不是完整 JSON Schema。OpenCode、OpenAPI Discovery 和部分 MCP 工具会带入 x-*、
+// deprecated、additionalProperties 等字段，原样发送会触发上游 400 Unknown name。
+const GEMINI_SCHEMA_KEYS = new Set([
+  'type', 'description', 'nullable', 'enum',
+  'properties', 'required', 'items', 'minimum', 'maximum'
 ]);
+
+const JSON_SCHEMA_KEYS_TO_DROP = new Set([
+  '$schema', '$id', '$anchor', '$comment', '$ref', '$defs', 'definitions',
+  'additionalProperties', 'patternProperties', 'unevaluatedProperties',
+  'dependentSchemas', 'dependentRequired', 'dependencies', 'propertyNames',
+  'const', 'not', 'if', 'then', 'else', 'contains', 'prefixItems',
+  'uniqueItems', 'exclusiveMaximum', 'exclusiveMinimum', 'multipleOf',
+  'readOnly', 'writeOnly', 'deprecated', 'xml', 'externalDocs',
+  'contentMediaType', 'contentEncoding', 'contentSchema', 'undefined',
+  'anyOf', 'oneOf', 'allOf', 'any_of', 'one_of', 'all_of',
+  'format', 'title', 'example', 'propertyOrdering', 'default',
+  'minProperties', 'maxProperties', 'minLength', 'maxLength',
+  'minItems', 'maxItems', 'pattern'
+]);
+
+const COMBINER_ALIASES = {
+  any_of: 'anyOf',
+  one_of: 'oneOf',
+  all_of: 'allOf'
+};
 
 // 需要转换为大写的 type 值映射
 const TYPE_UPPERCASE_MAP = {
@@ -55,38 +72,137 @@ const TYPE_UPPERCASE_MAP = {
   'number': 'NUMBER',
   'integer': 'INTEGER',
   'boolean': 'BOOLEAN',
-  'array': 'ARRAY'
+  'array': 'ARRAY',
+  'null': 'NULL'
 };
 
+const GEMINI_SCHEMA_TYPES = new Set(Object.values(TYPE_UPPERCASE_MAP));
+
 export function cleanParameters(obj) {
-  if (!obj || typeof obj !== 'object') return obj;
-  const cleaned = Array.isArray(obj) ? [] : {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (EXCLUDED_KEYS.has(key)) continue;
-    if (key === 'type') {
-      // 处理 type 字段
-      if (typeof value === 'string') {
-        // 字符串类型：转换为大写
-        cleaned[key] = TYPE_UPPERCASE_MAP[value.toLowerCase()] || value.toUpperCase();
-      } else if (Array.isArray(value)) {
-        // 数组类型（如 ["string", "null"]）：取第一个非 null 的类型
-        // Gemini API 不支持联合类型，需要转换为单一类型
-        const nonNullType = value.find(t => t !== 'null' && t !== null);
-        if (nonNullType && typeof nonNullType === 'string') {
-          cleaned[key] = TYPE_UPPERCASE_MAP[nonNullType.toLowerCase()] || nonNullType.toUpperCase();
-        } else {
-          // 如果都是 null 或找不到有效类型，默认为 STRING
-          cleaned[key] = 'STRING';
-        }
-      } else {
-        // 其他情况，保持原值
-        cleaned[key] = value;
-      }
-    } else {
-      cleaned[key] = (value && typeof value === 'object') ? cleanParameters(value) : value;
+  return sanitizeGeminiSchema(obj);
+}
+
+function sanitizeGeminiSchema(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) return schema.map(item => sanitizeGeminiSchema(item)).filter(item => item !== undefined);
+
+  const normalized = { ...schema };
+  for (const [alias, canonical] of Object.entries(COMBINER_ALIASES)) {
+    if (normalized[canonical] === undefined && normalized[alias] !== undefined) {
+      normalized[canonical] = normalized[alias];
     }
   }
+
+  const cleaned = {};
+  for (const [key, value] of Object.entries(normalized)) {
+    if (key === 'allOf') {
+      mergeAllOf(cleaned, value);
+      continue;
+    }
+
+    if (key.startsWith('x-') || JSON_SCHEMA_KEYS_TO_DROP.has(key) || COMBINER_ALIASES[key]) continue;
+
+    if (!GEMINI_SCHEMA_KEYS.has(key)) continue;
+
+    const sanitizedValue = sanitizeGeminiSchemaValue(key, value);
+    if (sanitizedValue !== undefined) cleaned[key] = sanitizedValue;
+  }
+
+  if (isNullableTypeArray(schema.type)) cleaned.nullable = true;
+  appendEnumDescriptions(cleaned, schema);
+  appendDefaultToDescription(cleaned, schema.default);
+
   return cleaned;
+}
+
+function sanitizeGeminiSchemaValue(key, value) {
+  if (value === undefined) return undefined;
+  switch (key) {
+    case 'type':
+      return normalizeGeminiSchemaType(value);
+    case 'properties':
+      return sanitizeSchemaProperties(value);
+    case 'items':
+      return sanitizeGeminiSchema(value);
+    case 'required':
+    case 'enum':
+      return Array.isArray(value) ? value.map(item => String(item)) : undefined;
+    default:
+      return (value && typeof value === 'object') ? sanitizeGeminiSchema(value) : value;
+  }
+}
+
+function sanitizeSchemaProperties(properties) {
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return undefined;
+  const cleaned = {};
+  for (const [propertyName, propertySchema] of Object.entries(properties)) {
+    cleaned[propertyName] = sanitizeGeminiSchema(propertySchema);
+  }
+  return cleaned;
+}
+
+function sanitizeSchemaArray(value) {
+  if (!Array.isArray(value)) return undefined;
+  return value.map(item => sanitizeGeminiSchema(item)).filter(item => item && typeof item === 'object');
+}
+
+function normalizeGeminiSchemaType(value) {
+  if (typeof value === 'string') return normalizeSingleGeminiSchemaType(value);
+  if (Array.isArray(value)) {
+    const nonNullType = value.find(type => type !== 'null' && type !== null && type !== 'NULL');
+    return typeof nonNullType === 'string' ? normalizeSingleGeminiSchemaType(nonNullType) : 'STRING';
+  }
+  return value;
+}
+
+function normalizeSingleGeminiSchemaType(value) {
+  const normalized = TYPE_UPPERCASE_MAP[value.toLowerCase()] || value.toUpperCase();
+  return GEMINI_SCHEMA_TYPES.has(normalized) ? normalized : 'STRING';
+}
+
+function isNullableTypeArray(type) {
+  return Array.isArray(type) && type.some(item => item === 'null' || item === null || item === 'NULL');
+}
+
+function mergeAllOf(target, value) {
+  const sanitized = sanitizeSchemaArray(value);
+  if (!sanitized || sanitized.length === 0) return;
+
+  for (const schema of sanitized) {
+    for (const [key, val] of Object.entries(schema)) {
+      if (key === 'properties' && val && typeof val === 'object' && !Array.isArray(val)) {
+        target.properties = { ...(target.properties || {}), ...val };
+      } else if (key === 'required' && Array.isArray(val)) {
+        target.required = Array.from(new Set([...(target.required || []), ...val]));
+      } else if (key === 'description' && val) {
+        target.description = [target.description, val].filter(Boolean).join('\n');
+      } else if (target[key] === undefined) {
+        target[key] = val;
+      }
+    }
+  }
+}
+
+function appendEnumDescriptions(target, source) {
+  const enumDescriptions = source?.['x-google-enum-descriptions'];
+  if (!Array.isArray(source?.enum) || !Array.isArray(enumDescriptions) || enumDescriptions.length === 0) return;
+
+  const lines = source.enum.map((enumValue, index) => {
+    const enumDescription = enumDescriptions[index];
+    return enumDescription ? `${String(enumValue)} - ${String(enumDescription)}` : String(enumValue);
+  });
+  appendDescription(target, `Enum values: ${lines.join('; ')}`);
+}
+
+function appendDefaultToDescription(target, defaultValue) {
+  if (defaultValue === undefined) return;
+  const renderedDefault = typeof defaultValue === 'string' ? defaultValue : JSON.stringify(defaultValue);
+  if (renderedDefault !== undefined) appendDescription(target, `Default: ${renderedDefault}`);
+}
+
+function appendDescription(target, text) {
+  if (!text) return;
+  target.description = target.description ? `${target.description}\n${text}` : text;
 }
 
 // ==================== Model Mapping ====================
